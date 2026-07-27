@@ -1,0 +1,25 @@
+[Unit]
+Description=Virex edge-agent (heartbeat + config reconcile)
+After=network-online.target docker.service
+Wants=network-online.target docker.service
+
+[Service]
+Type=simple
+User=edge-agent
+EnvironmentFile=/etc/virex/edge-agent.env
+WorkingDirectory=/etc/virex
+ExecStart=/usr/bin/python3 -m src.main
+Restart=on-failure
+RestartSec=10
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/etc/virex /var/lib/virex
+ProtectHome=true
+PrivateTmp=true
+CapabilityBoundingSet=CAP_SYS_ADMIN  # docker access — required
+AmbientCapabilities=CAP_SYS_ADMIN
+
+[Install]
+WantedBy=multi-user.target

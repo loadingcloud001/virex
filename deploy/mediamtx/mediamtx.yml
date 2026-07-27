@@ -1,0 +1,81 @@
+logLevel: info
+logDestinations: [stdout]
+api: yes
+metrics: yes
+
+# Auth — open user for first deployment (internal-only test).
+# Production must replace this with proper auth.
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+      - action: metrics
+      - action: pprof
+
+# Bind all protocol servers to offset ports to avoid conflict with the
+# existing `frigate` container (which already uses 8554/8888/8889).
+# Used because docker-compose runs all services with network_mode: host.
+rtspAddress: :19554
+hlsAddress: :19888
+webrtcAddress: :19889
+apiAddress: :19997
+metricsAddress: :19998
+# WebRTC ICE UDP listener (must be reachable by browser for ICE handshake)
+webrtcLocalUDPAddress: :19819
+webrtcICEHostNAT1To1IPs: []   # set to ["<host-public-ip>"] if accessing across NAT
+webrtcAdditionalHosts: []     # add other accessible hostnames/IPs here
+
+# Recording defaults — applied to H.264 normalized paths only
+# (so all recordings are unified H.264).
+#
+# IMPORTANT v1 AI stack requirement:
+#   * `recordSegmentDuration: 30s` — sealed fMP4 segments the `clip_builder`
+#     service can ffmpeg `-c copy` near an event timestamp (10 s clips)
+#     without waiting for long open segments.
+#   * `recordPartDuration: 200ms` — smaller atoms let ffmpeg start cuts
+#     sooner after edge-agent triggers e.g. person-watchdog events.
+# (Pre-delta: 1h / 1s — too long for any near-realtime clip.)
+pathDefaults:
+  record: false
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 200ms
+  recordSegmentDuration: 30s
+  recordMaxPartSize: 50M
+  recordDeleteAfter: 168h
+
+paths:
+  # ===== Layer 1: RAW (passthrough from camera, no recording) =====
+  # These paths receive the original camera RTSP (H.264 or H.265).
+  # Source URLs are injected at runtime via MTX_PATHS_*SOURCE env vars
+  # (see docker-compose.yml). No credentials in this file.
+  #
+  # IMPORTANT: Path names use NO underscores because MediaMTX treats
+  # underscores in path names as nesting (and the same applies to env
+  # var segments — MTX_PATHS_X_Y_KEY would be parsed as nested path X/Y).
+
+  he202504cam04raw:
+    sourceOnDemand: false
+    record: false
+    # MTX_PATHS_HE202504CAM04RAW_SOURCE set by docker-compose
+
+  hc202502cam04raw:
+    sourceOnDemand: false
+    record: false
+    # MTX_PATHS_HC202502CAM04RAW_SOURCE set by docker-compose
+
+  # ===== Layer 2: H.264 NORMALIZED (FFmpeg sidecars publish here) =====
+  # FFmpeg transcoder containers consume raw paths and publish H.264 here.
+  # Consumers (browsers, recorders, AI backends) should use these paths.
+
+  he202504cam04h264:
+    record: true
+
+  hc202502cam04h264:
+    record: true

@@ -1,0 +1,38 @@
+{#
+  SPDX-License-Identifier: Apache-2.0
+  Rendered by edge-agent's `reconcile.render_transcoder_compose()`.
+
+  One service per camera. The FFmpeg sidecar reads the `_raw` path
+  from MediaMTX (over host network, port 19554) and republishes an
+  H.264-normalized version to the `_h264` sibling path.
+
+  Adding/removing cameras flows entirely through this template; the
+  static `docker-compose.yml` does `include: ./docker-compose.transcoder.yml`
+  so `docker compose up -d --remove-orphans` reconciles both worker
+  and transcoder pools.
+#}
+services:
+{% for cam in cameras %}
+  transcoder-{{ cam.mtx_path }}:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    container_name: transcoder-{{ cam.mtx_path }}
+    restart: {{ restart_policy }}
+    network_mode: host
+    command: >
+      -hide_banner -loglevel info
+      -fflags +genpts -rtsp_transport tcp
+      -i rtsp://localhost:{{ mediamtx_rtsp_port }}/{{ cam.mtx_path }}raw
+      -c:v libx264 -profile:v high -level:v 4.2
+      -pix_fmt yuv420p -preset ultrafast -tune zerolatency
+      -b:v 4M -maxrate 4M -bufsize 2M
+      -g 50 -keyint_min 50 -sc_threshold 0 -bf 0
+      -r 25 -vf "scale=1920:1080"
+      -c:a aac -b:a 128k -ar 48000 -ac 2
+      -f rtsp -muxdelay 0 -muxpreload 0
+      rtsp://localhost:{{ mediamtx_rtsp_port }}/{{ cam.mtx_path }}{{ h264_suffix }}
+    healthcheck:
+      disable: true
+    labels:
+      virex-camera: "{{ cam.mtx_path }}"
+      virex-component: "transcoder"
+{% endfor %}

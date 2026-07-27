@@ -1,0 +1,34 @@
+{#
+  SPDX-License-Identifier: AGPL-3.0
+  Rendered by edge-agent's `reconcile.render_worker_compose()`.
+
+  One service per camera. The worker reads `workers.yaml` from
+  /etc/virex/ — the per-camera `CAMERAS_BUNDLE` env is preserved for
+  backward compat but the YAML file is the source of truth.
+
+  Each worker exposes a tiny admin HTTP server on `WORKER_ADMIN_PORT`
+  (default 32000 + camera index) on `127.0.0.1`. Edge-agent hits
+  `http://127.0.0.1:<port>/admin/reload` for hot-reload pushes so the
+  Tier A/B apply does not depend on the 5-second poller.
+
+  The workers.yaml bind source is an absolute HOST path injected via
+  `state_dir_host`. docker compose runs inside the edge-agent
+  container, but daemon-side bind source must be the host path the
+  docker daemon can resolve. Default is set to match the production
+  bind mount; override with `VIREX_EDGE_STATE_DIR` for portability.
+#}
+services:
+{% for cam in cameras %}
+  {{ cam.service_name }}:
+    image: {{ worker_image }}
+    restart: {{ restart_policy }}
+    network_mode: host
+    environment:
+      CAMERAS_BUNDLE: |
+        {{ cam.camera_json | indent(8) }}
+      WORKER_ADMIN_PORT: "{{ cam.admin_port }}"
+    volumes:
+      - {{ state_dir_host }}/workers.yaml:/etc/virex/workers.yaml:ro
+    labels:
+      virex-camera: "{{ cam.mtx_path }}"
+{% endfor %}

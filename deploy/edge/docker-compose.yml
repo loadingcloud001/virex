@@ -1,0 +1,168 @@
+# SPDX-License-Identifier: AGPL-3.0
+# Virex edge-node docker-compose (single RTX 4070 host, host networking).
+#
+# Brings up:
+#   * mediamtx                       — RTSP/HLS/WebRTC gateway + 30s segment recorder
+#   * tritonserver                    — NVIDIA Triton Inference Server
+#                                       (YOLOv8m + SAM2 + DepthAnything ensembles)
+#   * detector                       — Optional FastAPI shim for local dev
+#                                       (worker normally talks to Triton directly)
+#   * clip-builder                   — MQTT-subscribed ffmpeg cutter → MinIO
+#   * edge-agent                     — Heartbeat + portal config reconcile
+#
+# All secrets come from `deploy/edge/.env` (gitignored). See `.env.example`.
+#
+# The `include:` directives pull in two edge-agent-rendered compose
+# fragments. Each reconcile cycle regenerates these files, then calls
+# `docker compose -f <fragment> up -d --remove-orphans` so that adding
+# or removing a camera is fully automated — no manual compose editing.
+#
+#   * docker-compose.transcoder.yml  — one FFmpeg sidecar per camera
+#   * docker-compose.worker.yml      — one worker container per camera
+#
+# When all three compose files are merged via `docker compose up -d`,
+# you get the same effect as `include:` of v2.7+. If the user's
+# docker-compose-plugin is older (< 2.20), the edge-agent still works
+# because it reconciles the fragments individually.
+
+include:
+  - path: ./state/docker-compose.transcoder.yml
+  - path: ./state/docker-compose.worker.yml
+
+services:
+
+  # ----------------------------------------------------------------------
+  # Streaming substrate (mounted :rw so edge-agent can regenerate
+  # mediamtx.yml on every reconcile; restart handled by edge-agent).
+  # ----------------------------------------------------------------------
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    network_mode: host
+    volumes:
+      - ./state/mediamtx.yml:/mediamtx.yml:ro
+      # Bind the recordings directory from $VIREX_RECORDINGS_DIR so
+      # this compose file is host-agnostic (deploy/edge/.env overrides
+      # the default). The recording path lives outside this repo on
+      # purpose — it's operator-owned storage.
+      - ${VIREX_RECORDINGS_DIR:-./recordings}:/recordings
+    environment:
+      MTX_LOGLEVEL: info
+    healthcheck:
+      disable: true
+
+  # ----------------------------------------------------------------------
+  # AI inference: NVIDIA Triton Inference Server
+  # Hosts YOLOv8m, SAM2-base, DepthAnything-v2-small + 4 ensembles.
+  # Worker talks to it via KServe HTTP at 127.0.0.1:38000 (host network).
+  # ----------------------------------------------------------------------
+  tritonserver:
+    image: nvcr.io/nvidia/tritonserver:24.10-py3
+    container_name: tritonserver
+    restart: unless-stopped
+    network_mode: host
+    shm_size: 4g   # Triton's shared-memory IPC requires this
+    volumes:
+      - ./state/triton/model_repository:/models:ro
+    command:
+      - tritonserver
+      - --model-repository=/models
+      - --strict-model-config=false
+      - --log-verbose=1
+      - --log-info=true
+      - --grpc-port=38001
+      - --http-port=38000
+      - --metrics-port=38002
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://127.0.0.1:38000/v2/health/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s   # model load on first start can take ~30 s
+
+  # ----------------------------------------------------------------------
+  # AI inference (optional FastAPI shim for local dev / browser testing)
+  # Production workers talk to Triton directly via KServe HTTP; this
+  # container is only used by `curl http://127.0.0.1:31001/detect` for
+  # manual smoke tests. Set `DETECTOR_URL=http://127.0.0.1:31001` in
+  # the worker env to use this instead of Triton.
+  # ----------------------------------------------------------------------
+  detector:
+    image: virex-detector:latest
+    container_name: virex-detector
+    restart: unless-stopped
+    network_mode: host
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://127.0.0.1:31001/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  # ----------------------------------------------------------------------
+  # clip-builder (subscribes to MQTT virex/events_created on the VPS broker)
+  # ----------------------------------------------------------------------
+  clip-builder:
+    image: virex-ai-backend:latest
+    container_name: virex-clip-builder
+    restart: unless-stopped
+    network_mode: host
+    environment:
+      RECORDING_DIR: "/recordings"
+      MQTT_BROKER: "${MQTT_BROKER:?}"
+      MQTT_CLIENT_ID: "virex-clip-builder"
+      MINIO_ENDPOINT: "${MINIO_ENDPOINT:?}"
+      MINIO_REGION: "${MINIO_REGION:?}"
+      MINIO_ACCESS_KEY: "${MINIO_ACCESS_KEY:?}"
+      MINIO_SECRET_KEY: "${MINIO_SECRET_KEY:?}"
+      MINIO_BUCKET: "${MINIO_BUCKET:-virex}"
+      MINIO_SECURE: "${MINIO_SECURE:-true}"
+      PORTAL_INTERNAL_URL: "${PORTAL_INTERNAL_URL:?}"
+      PORTAL_BEARER: "${PORTAL_BEARER:?}"
+    volumes:
+      # Bind the recordings directory from $VIREX_RECORDINGS_DIR; see
+      # the mediamtx volume block above for the rationale.
+      - ${VIREX_RECORDINGS_DIR:-./recordings}:/recordings:ro
+    command: ["python", "-m", "clip_builder.main"]
+
+  # ----------------------------------------------------------------------
+  # edge-agent: owns mediamtx.yml + worker-compose + transcoder-compose reconciliation
+  # ----------------------------------------------------------------------
+  edge-agent:
+    image: virex-edge-agent:latest
+    container_name: virex-edge-agent
+    restart: unless-stopped
+    network_mode: host
+    pid: host  # NVML access reads from host process table
+    volumes:
+      # Docker socket for `docker compose up -d` calls during reconcile.
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Single shared state directory — edge-agent renders mediamtx.yml,
+      # worker-compose, transcoder-compose, AND workers.yaml here. The
+      # single bind mount avoids the kernel-page-cache staleness that
+      # happens with double-mounting (./state + ./workers.yaml on top).
+      - ./state:/etc/virex
+    environment:
+      VIREX_EDGE_NODE_ID: ${VIREX_NODE_ID:-1}
+      VIREX_EDGE_PORTAL_URL: "${PORTAL_INTERNAL_URL:?}"
+      VIREX_EDGE_PORTAL_BEARER: "${PORTAL_BEARER:?}"
+      # Absolute host path that the docker daemon can resolve when the
+      # rendered worker compose binds workers.yaml into each worker.
+      # Default assumes the canonical deploy/edge/state location; override
+      # via .env for any other layout.
+      VIREX_EDGE_STATE_DIR: "${VIREX_EDGE_STATE_DIR:-/home/loadingcloud001/virex/deploy/edge/state}"
+    command: ["python", "-m", "src.main"]

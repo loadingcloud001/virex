@@ -1,0 +1,73 @@
+services:
+  mediamtx:
+    image: bluenviron/mediamtx:latest
+    container_name: mediamtx
+    restart: unless-stopped
+    # Host network mode — required so WebRTC ICE UDP works without
+    # Docker NAT interference. All transcoders also use host network.
+    network_mode: host
+    volumes:
+      - ./mediamtx.yml:/mediamtx.yml:ro
+      - ./recordings:/recordings
+    environment:
+      # Layer 1 (raw) source URLs — credentials pulled from .env.
+      # The ${VAR:?msg} syntax makes Compose fail loudly if .env is missing
+      # a password.
+      MTX_PATHS_HE202504CAM04RAW_SOURCE: "rtsp://admin:${RTSP_PASSWORD_1:?RTSP_PASSWORD_1 not set}@218.189.218.174:554/Streaming/channels/401"
+      MTX_PATHS_HC202502CAM04RAW_SOURCE: "rtsp://admin:${RTSP_PASSWORD_2:?RTSP_PASSWORD_2 not set}@210.3.7.254:554/Streaming/channels/0401"
+      MTX_LOGLEVEL: info
+    # Healthcheck disabled: the MediaMTX image is minimal (no shell,
+    # wget, curl, or ps). External healthcheck should hit host port (19997).
+    healthcheck:
+      disable: true
+
+  # ====== FFmpeg transcoder sidecars ======
+  # Each consumes its raw path from MediaMTX via localhost, transcodes
+  # to H.264 High Profile, and publishes to the corresponding h264 path.
+  #
+  # All services use network_mode: host so they share the host network
+  # namespace — MediaMTX's WebRTC ICE UDP works without NAT interference.
+  #
+  # CPU (libx264) is used. To switch to NVIDIA NVENC, replace:
+  #   -c:v libx264  -> -c:v h264_nvenc -preset p4 -tune ll
+  #   -preset ultrafast -> -preset p4
+  #   -tune zerolatency -> -tune ll
+  #   -vf scale=...   -> -vf scale_npp=...
+  # and ensure the host has nvidia-container-runtime + the service has
+  # deploy.resources.reservations.devices.nvidia set.
+
+  transcoder-he202504cam04:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    container_name: transcoder-he202504cam04
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      -hide_banner -loglevel info
+      -fflags +genpts -rtsp_transport tcp
+      -i rtsp://localhost:19554/he202504cam04raw
+      -c:v libx264 -profile:v high -level:v 4.2
+      -pix_fmt yuv420p -preset ultrafast -tune zerolatency
+      -b:v 4M -maxrate 4M -bufsize 2M
+      -g 50 -keyint_min 50 -sc_threshold 0 -bf 0
+      -r 25 -vf "scale=1920:1080"
+      -c:a aac -b:a 128k -ar 48000 -ac 2
+      -f rtsp -muxdelay 0 -muxpreload 0
+      rtsp://localhost:19554/he202504cam04h264
+
+  transcoder-hc202502cam04:
+    image: jrottenberg/ffmpeg:7.1-alpine
+    container_name: transcoder-hc202502cam04
+    restart: unless-stopped
+    network_mode: host
+    command: >
+      -hide_banner -loglevel info
+      -fflags +genpts -rtsp_transport tcp
+      -i rtsp://localhost:19554/hc202502cam04raw
+      -c:v libx264 -profile:v high -level:v 4.2
+      -pix_fmt yuv420p -preset ultrafast -tune zerolatency
+      -b:v 4M -maxrate 4M -bufsize 2M
+      -g 50 -keyint_min 50 -sc_threshold 0 -bf 0
+      -r 25 -vf "scale=1920:1080"
+      -c:a aac -b:a 128k -ar 48000 -ac 2
+      -f rtsp -muxdelay 0 -muxpreload 0
+      rtsp://localhost:19554/hc202502cam04h264

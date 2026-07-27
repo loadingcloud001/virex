@@ -1,0 +1,71 @@
+{# SPDX-License-Identifier: Apache-2.0
+  Rendered by edge-agent `reconcile.render_mediamtx_yml()` on every
+  reconcile cycle. One YAML file written to `/etc/virex/mediamtx.yml`,
+  then MediaMTX is restarted.
+
+  Path names use NO underscores — MediaMTX treats underscores in path
+  names as nesting (and the same applies to env-var segments like
+  `MTX_PATHS_X_Y_KEY` which become nested path `X/Y`). #}
+logLevel: info
+logDestinations: [stdout]
+api: yes
+metrics: yes
+
+# Auth — open user for v1 dev deployment (internal-only test).
+# Production must replace this with proper auth (HTTP or JWT).
+authMethod: internal
+authInternalUsers:
+  - user: any
+    pass:
+    ips: []
+    permissions:
+      - action: publish
+      - action: read
+      - action: playback
+      - action: api
+      - action: metrics
+      - action: pprof
+
+# Host-network bind — keep offsets out of frigate's :8554/:8888/:8889.
+rtspAddress: :19554
+hlsAddress: :19888
+webrtcAddress: :19889
+apiAddress: :19997
+metricsAddress: :19998
+webrtcLocalUDPAddress: :19819
+webrtcICEHostNAT1To1IPs: []
+webrtcAdditionalHosts: []
+
+# Recording defaults — 30 s segments are required by clip-builder so
+# ffmpeg `-c copy` can produce 10 s clips at any event timestamp.
+pathDefaults:
+  record: false
+  recordPath: /recordings/%path/%Y-%m-%d_%H-%M-%S-%f
+  recordFormat: fmp4
+  recordPartDuration: 200ms
+  recordSegmentDuration: 30s
+  recordMaxPartSize: 50M
+  recordDeleteAfter: 168h
+
+paths:
+  # ===== Layer 1: RAW (passthrough from camera, no recording) =====
+{% for cam in cameras %}
+  {{ cam.mtx_path }}raw:
+    sourceOnDemand: false
+    record: false
+{% if cam.source_rtsp %}
+    source: "{{ cam.source_rtsp }}"
+{% endif %}
+{% endfor %}
+
+  # ===== Layer 2: H.264 NORMALIZED (FFmpeg sidecars publish here) =====
+{# H.264 paths are populated by edge-agent at reconcile time. The
+   transcoder sidecars run in `docker-compose.transcoder.yml`,
+   also rendered by edge-agent from workers.yaml. Adding/removing
+   cameras flows entirely through the reconcile cycle — no manual
+   compose editing required. #}
+{% for cam in cameras %}
+  {{ cam.mtx_path }}{{ h264_suffix }}:
+    sourceOnDemand: false
+    record: {{ 'true' if cam.record else 'false' }}
+{% endfor %}

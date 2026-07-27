@@ -1,0 +1,108 @@
+# SPDX-License-Identifier: Apache-2.0
+# Virex control-plane stack on the Hetzner VPS.
+#
+# Brings up: PostgreSQL, Redis, Mosquitto, MinIO, FastAPI portal,
+# event-router, n8n (notification fan-out).
+#
+# Secrets via deploy/vps/.env (gitignored). See .env.example.
+
+services:
+
+  # ----------------------------------------------------------------------
+  # Data plane
+  # ----------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: virex-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-virex}
+      POSTGRES_USER: ${POSTGRES_USER:-virex}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "virex"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: virex-redis
+    restart: unless-stopped
+    command: ["redis-server", "--save", "60", "1", "--loglevel", "warning"]
+    volumes:
+      - redis-data:/data
+
+  mosquitto:
+    image: eclipse-mosquitto:2
+    container_name: virex-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      - mosquitto-data:/mosquitto/data
+      - mosquitto-log:/mosquitto/log
+
+  minio:
+    image: minio/minio:latest
+    container_name: virex-minio
+    restart: unless-stopped
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+
+  # ----------------------------------------------------------------------
+  # App plane
+  # ----------------------------------------------------------------------
+  portal:
+    image: virex-portal:latest
+    container_name: virex-portal
+    restart: unless-stopped
+    environment:
+      VIREX_DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-virex}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-virex}"
+      VIREX_REDIS_URL: "redis://redis:6379/0"
+      VIREX_MINIO_ENDPOINT: "minio:9000"
+      VIREX_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
+      VIREX_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
+      VIREX_MINIO_SECURE: "false"
+      VIREX_EDGE_BEARER: ${VIREX_EDGE_BEARER:?}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    ports:
+      - "8000:8000"
+
+  event-router:
+    image: virex-event-router:latest
+    container_name: virex-event-router
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://${POSTGRES_USER:-virex}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-virex}"
+      REDIS_URL: "redis://redis:6379/0"
+      MQTT_BROKER: "mosquitto:1883"
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_started
+      mosquitto:
+        condition: service_started
+
+volumes:
+  postgres-data:
+  redis-data:
+  mosquitto-data:
+  mosquitto-log:
+  minio-data:

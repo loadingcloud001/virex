@@ -1,0 +1,50 @@
+# SPDX-License-Identifier: Apache-2.0
+# Detector — RT-DETR-R18 on RTX 4070.
+#
+# Plain FastAPI service (replaces BentoML). BentoML 1.4.39's pydantic
+# input_spec forwards inputs in inconsistent shapes (list/dict/str)
+# depending on request internals, making raw-bytes ingestion brittle.
+# FastAPI + python-multipart handles multipart/form-data natively, which
+# is the standard way to upload JPEG frames to a CV service.
+#
+# The service exposes:
+#   GET  /healthz   — liveness probe
+#   POST /detect    — multipart/form-data `image=<JPEG>`, returns JSON list of detections
+#
+# Run locally during development:
+#     uvicorn detector.app:VirexDetectorApp --host 0.0.0.0 --port 31001
+# Or inside Docker via CMD below.
+
+FROM nvidia/cuda:12.1.1-runtime-ubuntu22.04 AS runtime
+
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends \
+        python3.11 python3-pip \
+        libgl1 \
+        ca-certificates && \
+    rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+RUN pip install --quiet \
+        "torch>=2.2,<2.3" \
+        "transformers>=4.45,<4.46" \
+        "pillow>=10" \
+        "opencv-python-headless>=4.9" \
+        "numpy<2" \
+        "structlog>=24" \
+        "pyyaml>=6" \
+        "fastapi>=0.110" \
+        "uvicorn[standard]>=0.29" \
+        "python-multipart>=0.0.9"
+
+COPY detector /app/detector
+
+EXPOSE 31001
+
+CMD ["uvicorn", "detector.app:VirexDetectorApp", "--host", "0.0.0.0", "--port", "31001"]

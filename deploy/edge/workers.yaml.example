@@ -1,0 +1,128 @@
+# SPDX-License-Identifier: AGPL-3.0
+# Sample workers.yaml for the Virex edge pilot.
+#
+# Mounted at /etc/virex/workers.yaml (read-only) by the edge-agent
+# container AND by the rendered worker-compose services. The edge-agent
+# reads it as a fallback when the portal isn't reachable yet; in steady
+# state the portal is the source of truth and edge-agent re-renders
+# this file on every reconcile.
+#
+# For v1 pilot the camera stems match the existing dev MediaMTX path
+# names. Edge-agent rewrites mediamtx.yml on reconcile so the rendered
+# paths match.
+#
+# Per-camera config schema (Tier A fields all hot-reloadable):
+#   detect.*          — fps, classes, min_score, roi
+#   motion.*          — enabled, threshold, contour_area, lightning_threshold
+#   masks[]           — polygons to zero before motion + detect
+#   zones[]           — polygon regions; detection bottom-center inside → tag
+#   pipeline[]        — list of stages: detect, segment, depth
+#
+# See docs/ai-pipeline.md for the full architecture.
+
+detector_url: "http://127.0.0.1:38000"
+detector_kind: "triton"   # "triton" (prod) | "fastapi" (local dev)
+
+mqtt_broker: "${MQTT_BROKER}"
+mqtt_client_id: "virex-worker"
+mqtt_topic: "virex/detections"
+
+minio_endpoint: "${MINIO_ENDPOINT}"
+minio_secure: true
+minio_access_key: "${MINIO_ACCESS_KEY}"
+minio_secret_key: "${MINIO_SECRET_KEY}"
+minio_bucket: "virex"
+minio_region: "ap-singapore"
+
+snapshot_quality: 80
+node_id: 1
+layer_suffix: "h264"
+
+cameras:
+  # HE202504 Cam 04 — currently offline (RTSP 404 from upstream).
+  # Worker stays idle gracefully when its RTSP source is unreachable.
+  # When the upstream is restored, FFmpeg's RTSP retry will pick it up.
+  - mtx_path: "he202504cam04"
+    source_rtsp: ""
+    tenant_id: 1
+    camera_id: 1
+    record: true
+    detect:
+      fps: 5
+      classes: ["person"]
+      min_score: 0.5
+      roi: []
+    motion:
+      enabled: true
+      threshold: 30
+      contour_area: 10
+      lightning_threshold: 0.8
+    masks: []
+    zones:
+      - id: "loading_bay"
+        friendly_name: "Loading Bay"
+        objects: ["person"]
+        inertia: 3
+        coordinates:
+          - [0.20, 0.30]
+          - [0.50, 0.30]
+          - [0.50, 0.80]
+          - [0.20, 0.80]
+    pipeline:
+      - stage: detect
+        trigger: always
+      - stage: segment
+        trigger: on_high_conf
+
+  # HC202502 Cam 04 — live and producing events.
+  - mtx_path: "hc202502cam04"
+    source_rtsp: ""
+    tenant_id: 1
+    camera_id: 2
+    record: true
+    detect:
+      fps: 5
+      classes: ["person"]
+      min_score: 0.5
+      roi: []
+    motion:
+      enabled: true
+      threshold: 30
+      contour_area: 10
+      lightning_threshold: 0.8
+    masks:
+      # Mask out the timestamp / channel-name overlay burned into the
+      # camera feed (top-left corner) so motion doesn't fire on it.
+      - name: "timestamp_overlay"
+        coordinates:
+          - [0.0, 0.0]
+          - [0.3, 0.0]
+          - [0.3, 0.08]
+          - [0.0, 0.08]
+    zones:
+      - id: "entrance"
+        friendly_name: "Main entrance"
+        objects: ["person"]
+        inertia: 3
+        coordinates:
+          - [0.40, 0.50]
+          - [0.60, 0.50]
+          - [0.60, 0.95]
+          - [0.40, 0.95]
+      - id: "loading_dock"
+        friendly_name: "Loading dock"
+        objects: ["person", "truck"]
+        inertia: 5
+        coordinates:
+          - [0.65, 0.50]
+          - [0.95, 0.50]
+          - [0.95, 0.95]
+          - [0.65, 0.95]
+    pipeline:
+      - stage: detect
+        trigger: always
+      - stage: segment
+        trigger: on_high_conf
+      - stage: depth
+        trigger: on_zone_enter
+        zone_id: "entrance"

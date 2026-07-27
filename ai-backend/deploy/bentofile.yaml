@@ -1,0 +1,28 @@
+# SPDX-License-Identifier: Apache-2.0
+# Detector — BentoML service that loads RT-DETR-R18 on the RTX 4070.
+# Built via `bentoml build && bentoml containerize` from `ai-backend/`.
+# For local dev also runnable via `bentoml serve detector/service.py:VirexDetector`.
+
+service: "detector.service:VirexDetector"
+description: "Person detector for Virex (RT-DETR-R18, Apache-2.0)."
+labels:
+  owner: virex
+  stage: phase1
+include:
+  - "detector/**/*.py"
+  - "pyproject.toml"
+python:
+  packages:
+    - bentoml>=1.4
+    - torch>=2.2,<2.3
+    - transformers>=4.45,<4.46
+    - pillow>=10
+    - opencv-python-headless>=4.9
+    - numpy<2
+    - structlog>=24
+docker:
+  distro: python3.11
+  python_version: "3.11"
+# CUDA runtime is supplied by the BentoML image variant below; ensure
+# `bentoml build --opt image=nvidia/cuda:12.1.1-runtime-ubuntu22.04`
+# on the edge node, or set in BentoML config.

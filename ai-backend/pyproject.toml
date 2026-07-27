@@ -1,0 +1,82 @@
+[project]
+name = "virex-ai-backend"
+version = "0.1.0"
+description = "Virex AI edge stack: Ultralytics YOLOv8m + Triton ensembles, per-camera RTSP worker, clip builder."
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "AGPL-3.0" }
+authors = [{ name = "Loading Cloud" }]
+
+dependencies = [
+    # Detection runtime. `ultralytics` SDK is Apache-2.0; the bundled
+    # YOLO weights we ship are AGPL-3.0 (acceptable since Virex is
+    # itself AGPL-3.0). Pin a major version for reproducibility.
+    "ultralytics>=8.3",
+    # Computer-vision helpers.
+    "pillow>=10",
+    "opencv-python-headless>=4.9",
+    "numpy>=1.26,<2",
+    # Schema + HTTP + logging.
+    "pydantic>=2.5",
+    "structlog>=24",
+    "httpx>=0.27",
+    # ONNX export helper — `optimum-cli` produces the SAM2 / DepthAnything
+    # models. Optional at install-time; the FastAPI shim works without it
+    # (only Ultralytics .pt weights are loaded directly).
+    "optimum[exporters]>=1.21",
+    "onnx>=1.16",
+]
+
+[project.optional-dependencies]
+# Worker requires PyAV (RTSP), paho-mqtt, minio SDK, mqtt client. The
+# FastAPI admin server is worker-internal (for /admin/reload); no extra
+# deps needed.
+worker = [
+    "av>=12",
+    "paho-mqtt>=2",
+    "minio>=7.2",
+    "tenacity>=8",
+    "pyyaml>=6",
+]
+clip = [
+    "paho-mqtt>=2",
+    "minio>=7.2",
+    "httpx>=0.27",
+    "tenacity>=8",
+]
+# Triton runtime: NVIDIA's official server image is the supported
+# production target; for local dev we can also run the FastAPI shim
+# which only needs the core deps above.
+triton = [
+    "tritonclient[all]>=2.40",
+]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "fakeredis>=2",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["detector", "worker", "clip_builder"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W", "UP", "B", "SIM"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
