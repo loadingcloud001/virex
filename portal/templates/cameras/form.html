@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}{% if camera %}Edit camera · Virex{% else %}Add camera · Virex{% endif %}{% endblock %}
+{% block content %}
+<h1>{% if camera %}Edit camera: <code>{{ camera.mtx_path }}</code>{% else %}Add camera{% endif %}</h1>
+
+<div class="card" style="max-width: 720px;">
+  <form method="post" action="{% if camera %}/cameras/{{ camera.id }}/edit{% else %}/cameras/new{% endif %}">
+    <label for="name">Name</label>
+    <input id="name" name="name" type="text" required value="{{ camera.name if camera else '' }}">
+
+    <label for="mtx_path">mtx_path</label>
+    <input id="mtx_path" name="mtx_path" type="text" required pattern="[a-z0-9]+"
+           value="{{ camera.mtx_path if camera else '' }}"
+           {% if camera %}readonly{% endif %}>
+    <small style="color: var(--muted);">Lowercase alphanumeric. No underscores (MediaMTX nests them).</small>
+
+    <label for="rtsp_url">RTSP URL</label>
+    <input id="rtsp_url" name="rtsp_url" type="text" required
+           placeholder="rtsp://user:pass@host:554/path"
+           value="{{ camera.rtsp_url if camera else '' }}">
+
+    <label for="location">Location (optional)</label>
+    <input id="location" name="location" type="text" value="{{ camera.location if camera else '' }}">
+
+    <div class="row">
+      <div>
+        <label for="node_id">Node ID</label>
+        <input id="node_id" name="node_id" type="number" min="1"
+               value="{{ camera.node_id if camera and camera.node_id else '1' }}">
+      </div>
+      <div>
+        <label for="retention_days">Retention (days)</label>
+        <input id="retention_days" name="retention_days" type="number" min="1" max="365"
+               value="{{ camera.retention_days if camera else 7 }}">
+      </div>
+      <div>
+        <label for="recording_enabled">Recording</label>
+        <select id="recording_enabled" name="recording_enabled">
+          <option value="true" {% if not camera or camera.recording_enabled %}selected{% endif %}>enabled</option>
+          <option value="false" {% if camera and not cam.recording_enabled %}selected{% endif %}>disabled</option>
+        </select>
+      </div>
+    </div>
+
+    <div style="margin-top: 24px;">
+      <button type="submit">{% if camera %}Save{% else %}Add camera{% endif %}</button>
+      <a href="/cameras" class="btn secondary" style="margin-left: 8px;">Cancel</a>
+    </div>
+  </form>
+</div>
+{% endblock %}

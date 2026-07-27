@@ -1,9 +1,13 @@
 # SPDX-License-Identifier: Apache-2.0
 """Portal SQLAlchemy 2.0 ORM models.
 
-Phase E scope: `Tenant`, `Node`, `Camera` (with the renamed `mtx_path`
-column), `Event`, `AlertRule`. Phase-1 user/refresh-token models are
-intentionally stubbed here for completeness but kept simple.
+Phase 1 scope:
+- `Tenant` (with `slug` for subdomain routing)
+- `User` (admin / member / viewer, scoped to a tenant)
+- `Node` (a GPU edge node registered by an edge-agent)
+- `Camera` (with the `mtx_path` stem that MediaMTX + MQTT routing read)
+- `Event` (detection history, used by event-router sync + future UI)
+- `AlertRule` (Phase 2 — schema is here so Alembic migrations stay stable)
 """
 
 from __future__ import annotations
@@ -20,6 +24,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 from sqlalchemy.sql import func
@@ -27,16 +32,24 @@ from sqlalchemy.sql import func
 from core.database import Base
 
 # ---------------------------------------------------------------------------
-# Camera path regex — `t<tenant_id>c<camera_id>` (`t1c5`, `t10c42`)
-# NOT `t1_c5` (underscores trigger MediaMTX nesting bug, see docs).
+# Camera path regex. Originally `^t\d+c\d+$` (e.g. `t1c5`) — relaxed in
+# Phase 1 to also accept the pilot's pre-existing stems (`he202504cam04`,
+# `hc202502cam04`, `t1c6h264`). MediaMTX treats underscores as nesting,
+# so underscores are still excluded; otherwise any lowercase alphanumeric
+# string is accepted. Phase 2 may tighten this back once all operators
+# are on the canonical `t{tenant}c{camera}` naming.
 # ---------------------------------------------------------------------------
-MTX_PATH_RE: str = r"^t\d+c\d+$"
+MTX_PATH_RE: str = r"^[a-z0-9]+$"
 
 
 class Tenant(Base):
     __tablename__ = "tenants"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    # `slug` is the URL-safe identifier used in subdomain routing
+    # (`{slug}.portal.example.com`). `subdomain` is the legacy column
+    # kept for the older `tenants.subdomain` UI flow.
+    slug: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     subdomain: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     branding: Mapped[dict[str, Any]] = mapped_column(Text, default="{}")
@@ -48,6 +61,41 @@ class Tenant(Base):
     cameras: Mapped[list[Camera]] = relationship(
         back_populates="tenant", cascade="all, delete-orphan"
     )
+    users: Mapped[list[User]] = relationship(
+        back_populates="tenant", cascade="all, delete-orphan"
+    )
+
+
+class User(Base):
+    """A portal user. Phase 1 enforces `admin` only; `member` / `viewer`
+    are reserved for Phase 2 RBAC. Email is unique within a tenant,
+    not globally — operators can run two tenants with the same address.
+    """
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    email: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    role: Mapped[str] = mapped_column(String(20), default="admin")
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+    tenant: Mapped[Tenant] = relationship(back_populates="users")
+
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "email", name="uq_users_tenant_email"),
+        CheckConstraint("role IN ('admin', 'member', 'viewer')", name="ck_users_role"),
+    )
 
 
 class Node(Base):
@@ -55,11 +103,20 @@ class Node(Base):
 
     `current_config_version` is bumped by portal whenever a camera add/
     update causes the edge-agent to need to reconcile.
+
+    Nodes are tenant-scoped in Phase 1 (one tenant per edge node).
+    Phase 2 may allow multiple tenants per node.
     """
 
     __tablename__ = "nodes"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(
+        Integer,
+        ForeignKey("tenants.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
     hostname: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     tailscale_ip: Mapped[str] = mapped_column(String(45), nullable=False)
     gpu_model: Mapped[str | None] = mapped_column(String(100))
@@ -164,6 +221,7 @@ class AlertRule(Base):
 
 __all__: tuple[str, ...] = (
     "Tenant",
+    "User",
     "Node",
     "Camera",
     "Event",

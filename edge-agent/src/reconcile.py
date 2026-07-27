@@ -253,9 +253,20 @@ async def run_docker_compose_up(compose_path: Path, env_file: Path | None = None
     `/etc/virex/.env`), not a raw host path.
     """
     project_dir = compose_path.parent.resolve()
+    # Sanitise the file stem into a valid project name (lowercase
+    # alphanumeric + hyphens + underscores, must start with a letter
+    # or number). docker compose names appear in container labels and
+    # the volume prefix; pick something stable so the same compose file
+    # always maps to the same project.
+    safe_stem = (
+        compose_path.stem.replace(".", "-").replace("_", "-").lower()
+    )
+    project_name = f"edge-{safe_stem}"
     cmd: list[str] = [
         "docker",
         "compose",
+        "--project-name",
+        project_name,
         "--project-directory",
         str(project_dir),
         "-f",

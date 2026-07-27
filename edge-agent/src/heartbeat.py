@@ -11,10 +11,12 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Mapping
+from pathlib import Path
 
 import psutil
 import structlog
 
+from src.auth import load_or_register_jwt, refresh_jwt
 from src.config import Settings
 
 logger = structlog.get_logger(__name__)
@@ -92,15 +94,60 @@ async def heartbeat_loop(
     """Tail-recursive heartbeat loop. Exits when the asyncio task is cancelled."""
     gpu_sampler.enable()
     period = settings.heartbeat_period_sec
+    state_dir = Path(settings.state_dir)
+    token: str = ""
+
+    try:
+        token = await asyncio.to_thread(
+            load_or_register_jwt,
+            portal_url=settings.portal_url,
+            bootstrap_secret=settings.portal_bootstrap_secret,
+            state_dir=state_dir,
+            hostname=settings.node_hostname or "",
+            tailscale_ip="127.0.0.1",
+            gpu_model=None,
+            max_cameras=settings.node_max_cameras,
+        )
+    except Exception as e:  # noqa: BLE001
+        logger.warning("heartbeat_jwt_bootstrap_failed", error=str(e))
+
     while True:
         try:
             payload = sample_node(gpu_sampler)
             payload = {**payload, "node_id": settings.node_id}
-            await post_fn(
+            resp = await post_fn(
                 f"{settings.portal_url.rstrip('/')}/api/edge/heartbeat",
-                {"Authorization": f"Bearer {settings.portal_bearer}"},
+                {"Authorization": f"Bearer {token}"},
                 dict(payload),
             )
+            # httpx response has status_code; auto-rotate on 401 expired.
+            status_code = getattr(resp, "status_code", 200)
+            if status_code == 401:
+                try:
+                    token = await asyncio.to_thread(
+                        refresh_jwt,
+                        portal_url=settings.portal_url,
+                        current_token=token,
+                        state_dir=state_dir,
+                        node_id=settings.node_id,
+                    )
+                    logger.info("heartbeat_token_rotated")
+                except Exception as e:  # noqa: BLE001
+                    logger.warning(
+                        "heartbeat_rotate_failed", error=str(e)
+                    )
+                    token = await asyncio.to_thread(
+                        load_or_register_jwt,
+                        portal_url=settings.portal_url,
+                        bootstrap_secret=settings.portal_bootstrap_secret,
+                        state_dir=state_dir,
+                        hostname=settings.node_hostname or "",
+                        tailscale_ip="127.0.0.1",
+                        gpu_model=None,
+                        max_cameras=settings.node_max_cameras,
+                    )
+                await asyncio.sleep(period)
+                continue
             logger.info(
                 "heartbeat_sent",
                 node_id=settings.node_id,

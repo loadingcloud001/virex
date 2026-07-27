@@ -57,7 +57,7 @@ class ClipBuilderConfig:
     minio_bucket: str
     minio_secure: bool
     portal_internal_url: str
-    portal_bearer: str
+    portal_jwt_path: str
     # Optional fields with defaults (must come last).
     minio_region: str = ""
 
@@ -73,7 +73,6 @@ def load_env_config() -> ClipBuilderConfig:
         "MINIO_BUCKET",
         "MINIO_REGION",
         "PORTAL_INTERNAL_URL",
-        "PORTAL_BEARER",
     ]
     missing = [k for k in required if not os.environ.get(k)]
     if missing:
@@ -93,7 +92,9 @@ def load_env_config() -> ClipBuilderConfig:
         minio_secure=os.environ.get("MINIO_SECURE", "true").lower() == "true",
         minio_region=os.environ["MINIO_REGION"],
         portal_internal_url=os.environ["PORTAL_INTERNAL_URL"].rstrip("/"),
-        portal_bearer=os.environ["PORTAL_BEARER"],
+        portal_jwt_path=os.environ.get(
+            "PORTAL_JWT_PATH", "/etc/virex/edge.jwt"
+        ),
     )
 
 
@@ -225,7 +226,14 @@ class ClipBuilder:
 
     async def _patch_portal(self, event_id: int, clip_url: str) -> None:
         url = f"{self._cfg.portal_internal_url}/internal/events/{event_id}/clip"
-        headers = {"Authorization": f"Bearer {self._cfg.portal_bearer}"}
+        # Read the JWT issued by edge-agent. If absent (older deployment
+        # without portal), fall back to PORTAL_BEARER for compatibility.
+        jwt_path = Path(self._cfg.portal_jwt_path)
+        if jwt_path.is_file():
+            token = jwt_path.read_text(encoding="utf-8").strip()
+        else:
+            token = os.environ.get("PORTAL_BEARER", "")
+        headers = {"Authorization": f"Bearer {token}"}
         async with httpx.AsyncClient(timeout=HTTP_PATCH_TIMEOUT_SEC) as client:
             try:
                 for attempt in Retrying(

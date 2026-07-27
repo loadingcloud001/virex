@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     node_id: int = 1
     portal_url: str = "http://127.0.0.1:8000"
-    portal_bearer: str = "virex-edge-shared-secret"
+    portal_bootstrap_secret: str = "virex-edge-bootstrap-secret-change-me"
     heartbeat_period_sec: int = 30
     config_pull_period_sec: int = 60
     edge_compose_path: str = "/etc/virex/docker-compose.worker.yml"
@@ -30,9 +30,14 @@ class Settings(BaseSettings):
     mediamtx_rtsp_port: int = 19554
     mediamtx_h264_suffix: str = "h264"
     workers_yaml_path: str = "/etc/virex/workers.yaml"
-    state_dir: str = "/home/loadingcloud001/virex/deploy/edge/state"
+    # In-container: /etc/virex (the bind-mounted state dir).
+    # Local-dev: the operator can override via env to the host path
+    # so the bind mount is preserved.
+    state_dir: str = "/etc/virex"
     docker_compose_bin: str = "docker"
     worker_image: str = "virex-ai-backend:latest"
+    node_hostname: str = ""  # default to socket.gethostname() in main.py
+    node_max_cameras: int = 8
 
 
 settings = Settings()

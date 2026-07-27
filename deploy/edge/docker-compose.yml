@@ -132,11 +132,16 @@ services:
       MINIO_BUCKET: "${MINIO_BUCKET:-virex}"
       MINIO_SECURE: "${MINIO_SECURE:-true}"
       PORTAL_INTERNAL_URL: "${PORTAL_INTERNAL_URL:?}"
-      PORTAL_BEARER: "${PORTAL_BEARER:?}"
+      PORTAL_JWT_PATH: "/etc/virex/edge.jwt"
     volumes:
       # Bind the recordings directory from $VIREX_RECORDINGS_DIR; see
       # the mediamtx volume block above for the rationale.
       - ${VIREX_RECORDINGS_DIR:-./recordings}:/recordings:ro
+      # Mount state/ read-only so clip-builder can read the JWT that
+      # edge-agent persists after registering with the portal.
+      # Write: edge-agent writes here. Read: clip-builder reads it.
+      # Single-mount host state/ keeps the kernel-page-cache coherent.
+      - ./state:/etc/virex:ro
     command: ["python", "-m", "clip_builder.main"]
 
   # ----------------------------------------------------------------------
@@ -169,10 +174,10 @@ services:
     environment:
       VIREX_EDGE_NODE_ID: ${VIREX_NODE_ID:-1}
       VIREX_EDGE_PORTAL_URL: "${PORTAL_INTERNAL_URL:?}"
-      VIREX_EDGE_PORTAL_BEARER: "${PORTAL_BEARER:?}"
-      # Absolute host path that the docker daemon can resolve when the
-      # rendered worker compose binds workers.yaml into each worker.
-      # Default assumes the canonical deploy/edge/state location; override
-      # via .env for any other layout.
-      VIREX_EDGE_STATE_DIR: "${VIREX_EDGE_STATE_DIR:-/home/loadingcloud001/virex/deploy/edge/state}"
+      VIREX_EDGE_PORTAL_BOOTSTRAP_SECRET: "${VIREX_EDGE_BOOTSTRAP_SECRET:-virex-edge-bootstrap-secret-change-me}"
+      VIREX_EDGE_NODE_HOSTNAME: "${VIREX_EDGE_NODE_HOSTNAME:-edge-rtx4070-1}"
+      # Path inside the container (the bind-mounted /etc/virex).
+      # The host path that this resolves to is /home/loadingcloud001/virex/deploy/edge/state
+      # (see the volumes block above).
+      VIREX_EDGE_STATE_DIR: "${VIREX_EDGE_STATE_DIR:-/etc/virex}"
     command: ["python", "-m", "src.main"]

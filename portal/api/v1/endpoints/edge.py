@@ -1,23 +1,37 @@
 # SPDX-License-Identifier: Apache-2.0
-"""Internal + edge endpoints exposed by the portal for use by the edge-side
-services (`edge-agent`, `clip-builder`) over the Tailscale tunnel.
+"""Edge ↔ portal endpoints (Phase 1).
 
-These endpoints intentionally use a shared bearer-token scheme for v1
-(rather than per-tenant JWT). The actual token is delivered out-of-band
-to the edge node via `deploy/edge/.env`.
+Authentication: `require_edge_jwt` (bearer JWT) for /config and
+/heartbeat; `require_edge_bootstrap_secret` for first-time
+registration. The JWT subject is the `node_id`; the portal filters
+cameras by `Camera.node_id` matching the JWT subject.
+
+Endpoints:
+- POST /api/edge/nodes/register   — bootstrap (shared secret) → returns JWT
+- POST /api/edge/nodes/{id}/rotate — refresh JWT (uses old JWT for auth)
+- GET  /api/edge/config           — bundle for this node
+- POST /api/edge/heartbeat        — health telemetry
+- PATCH /internal/events/{id}/clip — clip-builder marks clip built
 """
 
 from __future__ import annotations
 
+import socket
 from datetime import datetime
 
 import structlog
-from fastapi import APIRouter, Depends, Header, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from api.v1.deps import (
+    require_edge_bootstrap_secret,
+    require_edge_jwt,
+)
 from core.config import settings
 from core.database import get_db
+from core.security import create_edge_token
 from models import Camera, Event, Node
 from schemas.edge import (
     CameraEdgeDTO,
@@ -31,6 +45,7 @@ logger = structlog.get_logger(__name__)
 
 router = APIRouter(tags=["edge"])
 
+
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
@@ -38,55 +53,152 @@ HEALTHY_TIMEOUT_SEC: int = 300  # Over this age, the node is `unhealthy`.
 
 
 # ---------------------------------------------------------------------------
-# Tiny bearer dependency (Phase-1 simple; upgrade to mTLS or JWT when needed).
+# /api/edge/nodes/register — first-time bootstrap
 # ---------------------------------------------------------------------------
-async def require_edge_bearer(
-    authorization: str = Header(default=""),
-) -> None:
-    """Validate `Authorization: Bearer <edge_bearer>` for /api/edge + /internal."""
-    expected = f"Bearer {settings.edge_bearer}"
-    if authorization != expected:
-        logger.warning("edge_auth_rejected", authorization=authorization[:32])
+class NodeRegisterRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    hostname: str = Field(min_length=1, max_length=255)
+    tailscale_ip: str = Field(min_length=1, max_length=45)
+    gpu_model: str | None = Field(default=None, max_length=100)
+    max_cameras: int = Field(default=50, ge=1, le=5000)
+
+
+class NodeRegisterResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    node_id: int
+    jwt_token: str
+    ttl_sec: int
+    tenant_id: int
+
+
+@router.post(
+    "/api/edge/nodes/register",
+    response_model=NodeRegisterResponse,
+    summary="First-time edge registration (uses shared bootstrap secret).",
+)
+async def register_node(
+    body: NodeRegisterRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    _auth: None = Depends(require_edge_bootstrap_secret),  # noqa: B008
+) -> NodeRegisterResponse:
+    """Issue a JWT for an edge node. Idempotent on `hostname`."""
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id is None:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid edge bearer token.",
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="portal not seeded",
         )
 
+    # Idempotent on hostname within tenant.
+    stmt = select(Node).where(
+        Node.tenant_id == tenant_id,
+        Node.hostname == body.hostname,
+    )
+    node = (await db.execute(stmt)).scalar_one_or_none()
 
-BearerDep = Depends(require_edge_bearer)
+    if node is None:
+        node = Node(
+            tenant_id=tenant_id,
+            hostname=body.hostname,
+            tailscale_ip=body.tailscale_ip,
+            gpu_model=body.gpu_model,
+            max_cameras=body.max_cameras,
+            status="pending",
+        )
+        db.add(node)
+        await db.commit()
+        await db.refresh(node)
+        logger.info(
+            "edge_node_registered",
+            node_id=node.id,
+            hostname=body.hostname,
+            tenant_id=tenant_id,
+        )
+    else:
+        # Update liveness info; don't reset status (heartbeat does that).
+        node.last_heartbeat_at = datetime.utcnow()
+        await db.commit()
+
+    token = create_edge_token(
+        jwt_secret=settings.jwt_secret,
+        node_id=node.id,
+        tenant_id=node.tenant_id,
+        hostname=node.hostname,
+        ttl_sec=settings.jwt_ttl_sec,
+    )
+
+    return NodeRegisterResponse(
+        node_id=node.id,
+        jwt_token=token,
+        ttl_sec=settings.jwt_ttl_sec,
+        tenant_id=node.tenant_id,
+    )
 
 
 # ---------------------------------------------------------------------------
-# /api/edge/config — what the edge-agent pulls every 60s
+# /api/edge/nodes/{id}/rotate — refresh JWT
+# ---------------------------------------------------------------------------
+@router.post(
+    "/api/edge/nodes/{node_id}/rotate",
+    response_model=NodeRegisterResponse,
+    summary="Rotate JWT (requires current valid JWT).",
+)
+async def rotate_node_token(
+    node_id: int,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    node: Node = Depends(require_edge_jwt),  # noqa: B008
+) -> NodeRegisterResponse:
+    """Issue a fresh JWT for the calling node."""
+    if node.id != node_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="cannot rotate a token for a different node",
+        )
+
+    token = create_edge_token(
+        jwt_secret=settings.jwt_secret,
+        node_id=node.id,
+        tenant_id=node.tenant_id,
+        hostname=node.hostname,
+        ttl_sec=settings.jwt_ttl_sec,
+    )
+    logger.info("edge_node_token_rotated", node_id=node.id)
+
+    return NodeRegisterResponse(
+        node_id=node.id,
+        jwt_token=token,
+        ttl_sec=settings.jwt_ttl_sec,
+        tenant_id=node.tenant_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /api/edge/config — JWT-protected, returns cameras for the JWT's node
 # ---------------------------------------------------------------------------
 @router.get(
     "/api/edge/config",
     response_model=EdgeConfigBundle,
-    dependencies=[BearerDep],
-    summary="Cameras-per-node bundle",
+    summary="Cameras-per-node bundle (JWT-required).",
 )
 async def get_edge_config(
-    node_id: int,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    node: Node = Depends(require_edge_jwt),  # noqa: B008
     since: int = 0,
-) -> EdgeConfigBundle | None:
-    """Return active cameras for `node_id`.
-
-    Edge-agent can include `since=<known_config_version>` for cheap 304
-    short-circuiting; we keep the implementation simple and always
-    return the fresh payload (Phase 2 can fix the cache).
-    """
-    stmt = select(Node).where(Node.id == node_id)
-    node_row = (await db.execute(stmt)).scalar_one_or_none()
-    if node_row is None:
-        raise HTTPException(status_code=404, detail="node not found")
-
-    cams_stmt = select(Camera).where(Camera.node_id == node_id, Camera.status == "active")
+) -> EdgeConfigBundle:
+    """Return active cameras for `node` (from JWT subject)."""
+    cams_stmt = (
+        select(Camera)
+        .where(Camera.node_id == node.id, Camera.status == "active")
+        .order_by(Camera.id)
+    )
     cams = (await db.execute(cams_stmt)).scalars().all()
 
     bundle = EdgeConfigBundle(
-        node_id=node_row.id,
-        config_version=node_row.current_config_version,
+        node_id=node.id,
+        config_version=node.current_config_version,
         cameras=[
             CameraEdgeDTO(
                 mtx_path=c.mtx_path,
@@ -100,52 +212,51 @@ async def get_edge_config(
         ],
     )
 
-    # If `since` matches the latest config_version, signal no-change.
-    if since == node_row.current_config_version:
+    if since == node.current_config_version:
         logger.debug(
             "edge_config_unchanged",
-            node_id=node_id,
-            config_version=node_row.current_config_version,
+            node_id=node.id,
+            config_version=node.current_config_version,
         )
-        return bundle
-    logger.info(
-        "edge_config_emitted",
-        node_id=node_id,
-        config_version=node_row.current_config_version,
-        camera_count=len(bundle.cameras),
-        since=since,
-    )
+    else:
+        logger.info(
+            "edge_config_emitted",
+            node_id=node.id,
+            config_version=node.current_config_version,
+            camera_count=len(bundle.cameras),
+            since=since,
+        )
+
     return bundle
 
 
 # ---------------------------------------------------------------------------
-# /api/edge/heartbeat — nvidia-smi stats from edge-agent
+# /api/edge/heartbeat — JWT-protected
 # ---------------------------------------------------------------------------
 @router.post(
     "/api/edge/heartbeat",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[BearerDep],
-    summary="Update node lehealth status",
+    summary="Update node health status.",
 )
 async def post_heartbeat(
     payload: HeartbeatPayload,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    node: Node = Depends(require_edge_jwt),  # noqa: B008
 ) -> None:
     """Update node heartbeat timestamp + status. Idempotent."""
     now = datetime.utcnow()
     healthy = "healthy" if payload.healthy else "unhealthy"
 
-    stmt = (
+    await db.execute(
         update(Node)
-        .where(Node.id == payload.node_id)
+        .where(Node.id == node.id)
         .values(last_heartbeat_at=now, status=healthy)
     )
-    await db.execute(stmt)
     await db.commit()
 
     logger.info(
         "heartbeat_recorded",
-        node_id=payload.node_id,
+        node_id=node.id,
         gpu_percent=payload.gpu_percent,
         gpu_mem_mb=payload.gpu_mem_mb,
         healthy=payload.healthy,
@@ -153,19 +264,20 @@ async def post_heartbeat(
 
 
 # ---------------------------------------------------------------------------
-# /internal/events/{event_id}/clip — clip-builder PATCHes the row
+# /internal/events/{event_id}/clip — JWT-protected
 # ---------------------------------------------------------------------------
 @router.patch(
     "/internal/events/{event_id}/clip",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[BearerDep],
-    summary="Mark an event clip as built",
+    summary="Mark an event clip as built (JWT-required).",
 )
 async def patch_event_clip(
     event_id: int,
     body: ClipPatchDTO,
     db: AsyncSession = Depends(get_db),  # noqa: B008
+    _auth: Node = Depends(require_edge_jwt),  # noqa: B008
 ) -> None:
+    """Clip-builder notifies the portal that a clip is ready."""
     stmt = (
         update(Event)
         .where(Event.id == event_id)
@@ -179,3 +291,7 @@ async def patch_event_clip(
 
 
 __all__: tuple[str, ...] = ("router",)
+
+
+# Suppress unused-import warning.
+_ = socket

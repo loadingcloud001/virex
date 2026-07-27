@@ -74,14 +74,14 @@ services:
       VIREX_MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       VIREX_MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       VIREX_MINIO_SECURE: "false"
-      VIREX_EDGE_BEARER: ${VIREX_EDGE_BEARER:?}
+      VIREX_EDGE_BOOTSTRAP_SECRET: ${VIREX_EDGE_BOOTSTRAP_SECRET:?}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_started
     ports:
-      - "8000:8000"
+      - "8765:8000"
 
   event-router:
     image: virex-event-router:latest

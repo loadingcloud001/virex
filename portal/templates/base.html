@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Virex Portal{% endblock %}</title>
+  <style>
+    /* Minimal hand-rolled CSS — no Tailwind yet (Phase 2). Phase 1 ships
+       with a single stylesheet in <style> below so the operator doesn't
+       need a build step. Tailwind / a real asset pipeline is planned
+       for Phase 2 when we add Event list + WebRTC player. */
+    :root {
+      --bg: #0f1115;
+      --panel: #1a1d23;
+      --border: #2a2f38;
+      --fg: #e7e9ee;
+      --muted: #9aa0a6;
+      --accent: #4f8cff;
+      --accent-hover: #6a9fff;
+      --danger: #d9594f;
+      --ok: #5fb368;
+    }
+    *, *::before, *::after { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0; background: var(--bg); color: var(--fg);
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 14px; line-height: 1.5;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { color: var(--accent-hover); text-decoration: underline; }
+    header.nav {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
+    }
+    header.nav .brand { font-weight: 600; letter-spacing: 0.02em; }
+    header.nav nav a { margin-right: 16px; }
+    header.nav .user { color: var(--muted); }
+    main {
+      max-width: 1100px; margin: 32px auto; padding: 0 24px;
+    }
+    h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
+    h1 { font-size: 22px; margin: 0 0 24px; }
+    h2 { font-size: 18px; margin: 24px 0 12px; }
+    .card {
+      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
+      padding: 20px 24px; margin-bottom: 16px;
+    }
+    table {
+      width: 100%; border-collapse: collapse; margin-top: 8px;
+    }
+    th, td {
+      text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border);
+    }
+    th {
+      font-weight: 500; color: var(--muted); font-size: 12px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+    }
+    tr:hover td { background: rgba(255,255,255,0.02); }
+    .badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .badge.ok { background: rgba(95, 179, 104, 0.15); color: var(--ok); }
+    .badge.muted { background: rgba(154, 160, 166, 0.15); color: var(--muted); }
+    .badge.danger { background: rgba(217, 89, 79, 0.15); color: var(--danger); }
+    button, .btn {
+      display: inline-block; padding: 8px 14px; border-radius: 6px;
+      background: var(--accent); color: #fff; border: 0; cursor: pointer;
+      font: inherit; font-weight: 500;
+    }
+    button:hover, .btn:hover { background: var(--accent-hover); }
+    button.secondary, .btn.secondary {
+      background: transparent; color: var(--fg); border: 1px solid var(--border);
+    }
+    button.danger, .btn.danger { background: var(--danger); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    input, select, textarea {
+      width: 100%; padding: 8px 10px; background: var(--bg);
+      color: var(--fg); border: 1px solid var(--border); border-radius: 4px;
+      font: inherit; margin-top: 4px;
+    }
+    label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
+    .row { display: flex; gap: 16px; align-items: flex-end; }
+    .row > * { flex: 1; }
+    .empty {
+      padding: 32px; text-align: center; color: var(--muted);
+      border: 1px dashed var(--border); border-radius: 8px;
+    }
+    .flash {
+      padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;
+      background: rgba(217, 89, 79, 0.1); border: 1px solid var(--danger);
+      color: var(--fg);
+    }
+    .flash.ok {
+      background: rgba(95, 179, 104, 0.1); border-color: var(--ok);
+    }
+    form.inline { display: inline; }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <div>
+      <a class="brand" href="/cameras">Virex</a>
+      <nav style="display: inline-block; margin-left: 24px;">
+        {% if user %}
+          <a href="/cameras">Cameras</a>
+          <a href="/users">Users</a>
+        {% endif %}
+      </nav>
+    </div>
+    <div>
+      {% if user %}
+        <span class="user">{{ user.email }} · {{ user.role }} · tenant <code>{{ tenant_slug }}</code></span>
+        <form class="inline" method="post" action="/logout" style="margin-left: 16px;">
+          <button type="submit" class="secondary">Logout</button>
+        </form>
+      {% else %}
+        <a href="/login">Login</a>
+      {% endif %}
+    </div>
+  </header>
+  <main>
+    {% if flash %}
+      <div class="flash {% if flash_ok %}ok{% endif %}">{{ flash }}</div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </main>
+</body>
+</html>
