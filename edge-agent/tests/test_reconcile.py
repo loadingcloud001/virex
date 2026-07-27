@@ -100,6 +100,36 @@ def test_render_worker_compose_unchanged() -> None:
     text = render_worker_compose(bundle, settings)
     assert "worker-t1c5h264:" in text
     assert "virex-camera: \"t1c5h264\"" in text
+    # Worker must inherit MINIO_*/MQTT_* from deploy/edge/.env via env_file.
+    # See edge-agent/src/reconcile.py ensure_state_symlinks() — the
+    # project directory .env is a symlink maintained at reconcile time.
+    assert "env_file:" in text
+    assert ".env" in text
+
+
+def test_render_worker_compose_uses_relative_env_file() -> None:
+    """env_file must be the bare `.env` (relative to project dir) — not
+    an absolute host path. The symlink `state/.env -> ../.env` is what
+    makes the absolute resolution work; using an absolute path here
+    would bypass it.
+    """
+    settings = Settings()
+    bundle = _bundle([_cam()])
+    text = render_worker_compose(bundle, settings)
+    # No {{ state_dir_host }} leftover
+    assert "{{" not in text, f"Unrendered Jinja in worker compose:\n{text}"
+    # The rendered env_file directive itself must use the bare relative
+    # name. Comments are allowed to mention ../.env as documentation.
+    env_file_lines = [
+        ln.strip() for ln in text.splitlines()
+        if ln.strip().startswith("- ") and ".env" in ln
+    ]
+    assert any(ln == "- .env" for ln in env_file_lines), (
+        f"env_file must include bare relative `.env` — got {env_file_lines!r}"
+    )
+    # No absolute host paths sneaking into env_file:
+    for ln in env_file_lines:
+        assert not ln.startswith("- /"), f"env_file must be relative — got {ln!r}"
 
 
 def test_full_reconcile_text_for_two_cameras() -> None:

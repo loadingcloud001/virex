@@ -1387,7 +1387,7 @@ transcoding needed. Use it for AI consumption if its resolution (typically
 | Control API + Prometheus metrics built in | Dual-layer architecture adds 200–500 ms transcode latency |
 | MIT license — commercial-friendly | |
 | NVIDIA-documented FFmpeg transcoding pipeline integrates cleanly | |
-| Frigate-style dual-stream architecture maps directly to MediaMTX paths | |
+| Dual-stream architecture maps directly to MediaMTX paths (Frigate originated this pattern; Virex follows it) | |
 | Hikvision H.265 → H.264 unified-format pattern via FFmpeg hook | |
 
 ## References

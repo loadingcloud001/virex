@@ -83,7 +83,7 @@ classes.
 
 ## Motion detection (CPU pre-filter)
 
-Frigate-style motion detector (`worker/motion.py`):
+Frigate-inspired motion detector (`worker/motion.py`):
 
 1. Resize BGR frame to 320×180 grayscale.
 2. `cv2.absdiff(prev_gray, curr_gray) → mask` (threshold = `motion.threshold`).

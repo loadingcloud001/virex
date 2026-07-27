@@ -4,8 +4,17 @@
 #
 # Usage:
 #   cp .env.example .env            # fill in MQTT_BROKER, MINIO_*, PORTAL_*
-#   cp workers.yaml.example workers.yaml  # already in repo; v1 pilot only
+#   cp workers.yaml.example workers.yaml  # only if a custom config is needed
 #   ./up.sh                         # build images + bring up containers
+#
+# Single source of truth for secrets:
+#   `deploy/edge/.env` — read by both the parent docker compose
+#   (`--env-file .env`) AND by per-worker containers (symlinked from
+#   `state/.env`, see `reconcile.ensure_state_symlinks`).
+#   NEVER duplicate secrets into `workers.yaml` — that file uses
+#   `${VAR}` placeholders that `worker._yaml.expand_env()` resolves at
+#   load time. Rotating a key means editing ONE file (`deploy/edge/.env`)
+#   and restarting the affected workers.
 #
 # The script is idempotent: re-running it re-creates worker containers
 # via `docker compose up -d --remove-orphans`. To restart from scratch,
@@ -27,14 +36,17 @@ for arg in "$@"; do
     esac
 done
 
-# 1. Bootstrap .env + workers.yaml from examples if missing.
+# 1. Bootstrap .env from example if missing. .env is the ONLY place
+#    secrets live; do not duplicate them into workers.yaml.
 if [[ ! -f .env ]]; then
     cp .env.example .env
     echo "==> wrote .env from .env.example (fill in MQTT/MinIO/portal secrets)"
+    echo "==> this is the ONLY file you need to edit for credentials"
 fi
 if [[ ! -f workers.yaml ]]; then
     cp workers.yaml.example workers.yaml
     echo "==> wrote workers.yaml from workers.yaml.example"
+    echo "==> edit cameras (mtx_path, source_rtsp, detect.*, motion.*, zones)"
 fi
 
 # 2. Ensure the host-mounted directories exist.
@@ -63,7 +75,7 @@ if (( FRESH )); then
        /home/loadingcloud001/virex/deploy/edge/state/mediamtx.yml
 fi
 
-# 5. Bring everything up.
+# 5. Bring everything up. The single .env is the SSOT for all secrets.
 docker compose --env-file .env up -d --remove-orphans
 
 echo ""

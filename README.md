@@ -78,17 +78,21 @@ cd ../portal      && uv run pytest             # phase-2 API tests
 ```bash
 cd deploy/edge
 
-# 1. Bootstrap config
+# 1. Single source of truth for secrets: deploy/edge/.env
 cp .env.example .env
 # edit .env: MQTT_BROKER, MINIO_ENDPOINT, MINIO_ACCESS_KEY,
 #           MINIO_SECRET_KEY, MINIO_BUCKET, MINIO_REGION
-cp workers.yaml.example workers.yaml
-# edit cameras: mtx_path, source_rtsp, detect.classes, motion.*, zones, masks
 
-# 2. Build + bring up
+# 2. (Optional) override the bundled camera config
+cp workers.yaml.example workers.yaml
+# edit workers.yaml cameras: mtx_path, source_rtsp, detect.*, motion.*, zones, masks
+# NOTE: workers.yaml uses ${VAR} placeholders that resolve to values in .env at
+#       runtime — never duplicate secrets into workers.yaml.
+
+# 3. Build + bring up
 ./up.sh
 
-# 3. Verify
+# 4. Verify
 curl -s http://127.0.0.1:19997/v3/paths/list | jq '.items[] | {name: .confName, ready}'
 curl -s http://127.0.0.1:32000/admin/healthz    # any per-worker admin port
 ```
@@ -98,6 +102,18 @@ portal, edge-agent) and brings up MediaMTX + Mosquitto + edge-agent + per-camera
 worker containers + transcoder sidecars. The edge-agent then watches
 `workers.yaml` and applies changes without restarting MediaMTX (Tier A) or with
 a per-worker restart (Tier B/C/D).
+
+### Secret rotation
+
+There is **exactly one** file to edit when rotating any secret:
+`deploy/edge/.env`. After editing, restart the affected worker:
+
+```bash
+docker compose -p virex restart state-worker-<camera-mtx-path>-1
+```
+
+The edge-agent automatically maintains a `state/.env → ../.env` symlink so
+worker containers see the same single source of truth.
 
 ---
 

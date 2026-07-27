@@ -191,7 +191,7 @@ breaks out of `_loop_once` and re-reads the URL from `HotConfig`.
 - `_last_applied` cache round-trip
 - `make_config_watcher` factory
 
-Total: **80 unit tests across 4 modules**, all passing.
+Total: **159 unit tests across 4 modules** (118 ai-backend + 29 edge-agent + 12 event-router), all passing.
 
 ## Known Limitations
 

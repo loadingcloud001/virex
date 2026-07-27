@@ -11,6 +11,10 @@
   `http://127.0.0.1:<port>/admin/reload` for hot-reload pushes so the
   Tier A/B apply does not depend on the 5-second poller.
 
+  Secrets (MINIO_*, MQTT_*) come from /etc/virex/.env (mounted from
+  host's deploy/edge/.env). worker._yaml.expand_env() expands
+  ${VAR} placeholders in workers.yaml at load time.
+
   The workers.yaml bind source is an absolute HOST path injected via
   `state_dir_host`. docker compose runs inside the edge-agent
   container, but daemon-side bind source must be the host path the
@@ -23,6 +27,12 @@ services:
     image: {{ worker_image }}
     restart: {{ restart_policy }}
     network_mode: host
+    env_file:
+      # .env lives in the compose project directory (state/) and is
+      # maintained by edge-agent as a symlink to ../.env (see
+      # reconcile.ensure_state_symlinks). Use the bare relative name so
+      # docker compose auto-resolves it.
+      - .env
     environment:
       CAMERAS_BUNDLE: |
         {{ cam.camera_json | indent(8) }}
