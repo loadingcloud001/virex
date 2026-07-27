@@ -11,9 +11,17 @@
   `http://127.0.0.1:<port>/admin/reload` for hot-reload pushes so the
   Tier A/B apply does not depend on the 5-second poller.
 
-  Secrets (MINIO_*, MQTT_*) come from /etc/virex/.env (mounted from
-  host's deploy/edge/.env). worker._yaml.expand_env() expands
-  ${VAR} placeholders in workers.yaml at load time.
+  Secrets (MINIO_*, MQTT_*) come from /etc/virex/.env, which is bind-
+  mounted from the host's deploy/edge/.env in deploy/edge/docker-compose.yml.
+  Docker compose resolves `env_file` paths relative to the project
+  directory (= state/). We pass the CONTAINER path /etc/virex/.env
+  directly so docker compose doesn't have to follow any symlinks
+  (the bind mount is the only path that works on both the daemon side
+  and inside the worker container).
+
+  worker._yaml.expand_env() also expands ${VAR} placeholders in
+  workers.yaml at load time, but using env_file here means the env
+  vars are visible to ALL child processes, not just the YAML loader.
 
   The workers.yaml bind source is an absolute HOST path injected via
   `state_dir_host`. docker compose runs inside the edge-agent
@@ -28,11 +36,10 @@ services:
     restart: {{ restart_policy }}
     network_mode: host
     env_file:
-      # .env lives in the compose project directory (state/) and is
-      # maintained by edge-agent as a symlink to ../.env (see
-      # reconcile.ensure_state_symlinks). Use the bare relative name so
-      # docker compose auto-resolves it.
-      - .env
+      # Absolute container path — the bind mount at
+      # deploy/edge/docker-compose.yml makes /etc/virex/.env visible
+      # inside each worker container.
+      - /etc/virex/.env
     environment:
       CAMERAS_BUNDLE: |
         {{ cam.camera_json | indent(8) }}
