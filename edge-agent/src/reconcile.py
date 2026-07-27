@@ -237,7 +237,7 @@ async def run_subprocess(cmd: list[str]) -> tuple[int, bytes, bytes]:
     return (proc.returncode if proc.returncode is not None else 0), out, err
 
 
-async def run_docker_compose_up(compose_path: Path) -> int:
+async def run_docker_compose_up(compose_path: Path, env_file: Path | None = None) -> int:
     """Idempotent `docker compose up -d --remove-orphans`.
 
     `project_directory` is the directory containing `workers.yaml` so any
@@ -246,30 +246,28 @@ async def run_docker_compose_up(compose_path: Path) -> int:
     directory live under the bind-mounted /etc/virex (== state/ on host),
     so we reuse its parent as the project directory.
 
-    Also pass `--env-file ../.env` so docker compose expands ${VAR} in
-    any environment references inside the rendered compose file. The
-    env file lives at `deploy/edge/.env` (one level above state/); we
-    resolve the canonical path via the state_dir setting to keep this
-    location-independent.
+    Docker compose resolves `--env-file` relative to the project directory,
+    NOT the cwd. When invoked from inside the edge-agent container, the
+    env file path must be readable from the container's filesystem —
+    i.e. it should be the bind-mounted container-side path (e.g.
+    `/etc/virex/.env`), not a raw host path.
     """
     project_dir = compose_path.parent.resolve()
-    state_dir = Path(settings.state_dir).resolve()
-    env_file = (state_dir.parent / ".env").resolve()
-    rc, out, err = await run_subprocess(
-        [
-            "docker",
-            "compose",
-            "--project-directory",
-            str(project_dir),
-            "--env-file",
-            str(env_file),
-            "-f",
-            str(compose_path),
-            "up",
-            "-d",
-            "--remove-orphans",
-        ]
-    )
+    cmd: list[str] = [
+        "docker",
+        "compose",
+        "--project-directory",
+        str(project_dir),
+        "-f",
+        str(compose_path),
+        "up",
+        "-d",
+        "--remove-orphans",
+    ]
+    if env_file is not None:
+        # Insert --env-file BEFORE -f so docker compose parses flags left-to-right.
+        cmd = cmd[:2] + ["--env-file", str(env_file)] + cmd[2:]
+    rc, out, err = await run_subprocess(cmd)
     if rc != 0:
         logger.error(
             "docker_compose_up_failed",
@@ -357,34 +355,18 @@ async def worker_reload(worker_url: str, *, mtx_path: str = "") -> int:
 # ---------------------------------------------------------------------------
 # Full reconcile (Tier D) — keeps the old behaviour for add/remove.
 # ---------------------------------------------------------------------------
-async def ensure_state_symlinks(state_dir: Path) -> None:
-    """Ensure `state/.env` points to `../.env` so docker compose auto-loads it.
-
-    The single source of truth for secrets is `deploy/edge/.env`. We symlink
-    it into the compose project directory (`state/`) so both the rendered
-    worker compose (whose `env_file: .env` resolves relative to the project
-    directory) and the direct `--env-file ../.env` invocation in
-    `run_docker_compose_up` reach the same file. Safe to call repeatedly.
-    """
-    target = state_dir.parent / ".env"
-    link = state_dir / ".env"
-    if target.is_file() and (not link.exists() or link.is_symlink()):
-        if link.is_symlink() or link.exists():
-            link.unlink()
-        try:
-            link.symlink_to(target)
-            logger.info("state_env_symlink_created", link=str(link), target=str(target))
-        except FileExistsError:
-            pass
-
-
 async def run_reconcile(bundle: EdgeConfigBundle) -> None:
     """Apply the bundle to this edge node — full render + container restart."""
     settings = Settings()
     compose_path = Path(settings.edge_compose_path)
     mediamtx_path = Path(settings.mediamtx_main_path)
     transcoder_compose_path = compose_path.parent / "docker-compose.transcoder.yml"
-    state_dir = compose_path.parent
+    # The host's deploy/edge/.env is bind-mounted at /etc/virex/.env in this
+    # container. Use the CONTAINER-SIDE path so docker compose can read it
+    # (host-side paths are not visible from inside the container's mount
+    # namespace). The daemon will resolve the bind mount back to the host
+    # file when creating worker containers.
+    env_file_in_container = Path("/etc/virex/.env")
 
     compose_text = render_worker_compose(bundle, settings)
     mediamtx_text = render_mediamtx_yml(bundle, settings)
@@ -402,16 +384,10 @@ async def run_reconcile(bundle: EdgeConfigBundle) -> None:
         transcoder_changed=transcoder_changed,
     )
 
-    # Ensure state/.env -> ../.env symlink so the worker containers see
-    # MINIO_*/MQTT_* secrets at startup. The actual rotate lives in
-    # deploy/edge/.env; this symlink keeps the rendered worker compose
-    # resolving correctly without duplicating secrets.
-    await ensure_state_symlinks(state_dir)
-
     # Order matters: bring up transcoders before workers so `_h264` paths
     # are already accepting data when workers start pulling from them.
-    await run_docker_compose_up(transcoder_compose_path)
-    await run_docker_compose_up(compose_path)
+    await run_docker_compose_up(transcoder_compose_path, env_file=env_file_in_container)
+    await run_docker_compose_up(compose_path, env_file=env_file_in_container)
     if mediamtx_changed:
         await restart_mediamtx()
 

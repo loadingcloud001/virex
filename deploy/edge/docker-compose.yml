@@ -156,6 +156,16 @@ services:
       # single bind mount avoids the kernel-page-cache staleness that
       # happens with double-mounting (./state + ./workers.yaml on top).
       - ./state:/etc/virex
+      # Bind-mount the host's deploy/edge/.env at /etc/virex/.env so:
+      #   (a) docker compose can auto-load it via `env_file: .env` in the
+      #       rendered worker compose (resolves relative to project dir),
+      #   (b) `docker compose --env-file` can read it explicitly,
+      #   (c) edge-agent can access it from within its container.
+      # The host path (deploy/edge/.env) is the SINGLE source of truth for
+      # secrets; this bind mount is a deployment-time pointer. To rotate a
+      # secret, edit ONLY deploy/edge/.env and restart workers — no other
+      # file needs touching.
+      - ./.env:/etc/virex/.env:ro
     environment:
       VIREX_EDGE_NODE_ID: ${VIREX_NODE_ID:-1}
       VIREX_EDGE_PORTAL_URL: "${PORTAL_INTERNAL_URL:?}"

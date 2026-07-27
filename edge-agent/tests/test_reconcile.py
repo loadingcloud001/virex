@@ -101,17 +101,18 @@ def test_render_worker_compose_unchanged() -> None:
     assert "worker-t1c5h264:" in text
     assert "virex-camera: \"t1c5h264\"" in text
     # Worker must inherit MINIO_*/MQTT_* from deploy/edge/.env via env_file.
-    # See edge-agent/src/reconcile.py ensure_state_symlinks() — the
-    # project directory .env is a symlink maintained at reconcile time.
+    # The .env at state/ is provided by the deploy/edge/docker-compose.yml
+    # bind mount (./.env:/etc/virex/.env:ro), so docker compose's
+    # `env_file: .env` resolves correctly relative to the project dir.
     assert "env_file:" in text
     assert ".env" in text
 
 
 def test_render_worker_compose_uses_relative_env_file() -> None:
     """env_file must be the bare `.env` (relative to project dir) — not
-    an absolute host path. The symlink `state/.env -> ../.env` is what
-    makes the absolute resolution work; using an absolute path here
-    would bypass it.
+    an absolute host path. The bind mount at deploy/edge/docker-compose.yml
+    provides state/.env = host's deploy/edge/.env so docker compose's
+    `env_file: .env` resolves correctly.
     """
     settings = Settings()
     bundle = _bundle([_cam()])
