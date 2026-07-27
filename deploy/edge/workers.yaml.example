@@ -28,14 +28,14 @@ mqtt_client_id: "virex-worker"
 mqtt_topic: "virex/detections"
 
 minio_endpoint: "${MINIO_ENDPOINT}"
-minio_secure: true
+minio_secure: ${MINIO_SECURE:-true}
 minio_access_key: "${MINIO_ACCESS_KEY}"
 minio_secret_key: "${MINIO_SECRET_KEY}"
-minio_bucket: "virex"
-minio_region: "ap-singapore"
+minio_bucket: "${MINIO_BUCKET:-virex-snapshots}"
+minio_region: "${MINIO_REGION:-ap-singapore}"
 
 snapshot_quality: 80
-node_id: 1
+node_id: ${NODE_ID:-1}
 layer_suffix: "h264"
 
 cameras:

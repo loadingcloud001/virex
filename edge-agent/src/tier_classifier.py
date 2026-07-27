@@ -86,13 +86,23 @@ def parse_workers_yaml(path: str) -> EdgeConfigBundle:
     since epoch, mod 2^31) so successive writes produce monotonically
     increasing versions. `node_id` is read from the YAML, or defaults to
     whatever the bundle schema requires.
+
+    IMPORTANT: We run `expand_env()` before `yaml.safe_load` so that
+    `${VAR}` / `${VAR:-default}` placeholders resolve to their
+    runtime values. Without this the schema validator fails on
+    `${NODE_ID:-1}` with an int_parsing error and the file watcher
+    silently drops every config change. The ai-backend worker uses the
+    same `expand_env()` (see `worker._yaml`) — both loaders must stay
+    in sync or hot-reload breaks.
     """
     import yaml  # noqa: PLC0415
 
+    from src._yaml import expand_env  # noqa: PLC0415
     from src.config import Settings  # noqa: PLC0415
 
     raw = Path(path).read_text(encoding="utf-8")
-    data = yaml.safe_load(raw) or {}
+    expanded = expand_env(raw)
+    data = yaml.safe_load(expanded) or {}
     parsed = _WorkersYamlSchema.model_validate(data)
     settings = Settings()
     mtime_ns = Path(path).stat().st_mtime_ns

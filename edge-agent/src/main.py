@@ -52,8 +52,11 @@ def _local_bundle(settings: Settings) -> EdgeConfigBundle | None:
         return None
     import yaml  # noqa: PLC0415
 
+    from src._yaml import expand_env  # noqa: PLC0415
+
     raw = path.read_text(encoding="utf-8")
-    data = yaml.safe_load(raw) or {}
+    expanded = expand_env(raw)
+    data = yaml.safe_load(expanded) or {}
     cameras = [
         CameraEdgeDTO(
             mtx_path=c["mtx_path"],
