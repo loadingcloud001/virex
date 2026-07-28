@@ -2,7 +2,9 @@
    future delete/edit endpoints (Phase 2) can return just this fragment. #}
 <tr id="camera-row-{{ cam.id }}">
   <td><code class="text-xs">{{ cam.mtx_path }}</code></td>
-  <td>{{ cam.name }}</td>
+  <td>
+    <a href="/cameras/{{ cam.id }}" class="link link-hover">{{ cam.name }}</a>
+  </td>
   <td>{{ cam.location or "—" }}</td>
   <td>
     <code class="text-xs">{{ cam.rtsp_url[:48] }}{% if cam.rtsp_url|length > 48 %}…{% endif %}</code>

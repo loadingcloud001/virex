@@ -1,0 +1,58 @@
+{# Single-event <tr> rows. Included by both events/list.html (initial
+   render) and the HTMX `/api/events/table` endpoint (refresh).
+
+   The events list endpoint passes `cam_name_map` to map camera_id to a
+   human-readable label; the page-level template (`events/list.html`)
+   uses the same renderer so both code paths share the markup. #}
+{% if events %}
+  {% for ev in events %}
+    {% set cam_label = cam_name_map.get(ev.camera_id, "camera-" ~ ev.camera_id) %}
+    <tr id="event-row-{{ ev.id }}">
+      <td>
+        <time datetime="{{ ev.event_time.isoformat() }}"
+              title="{{ ev.event_time.isoformat() }}"
+              x-data="{ iso: '{{ ev.event_time.isoformat() }}' }"
+              x-text="relativeTime(iso)">
+          {{ ev.event_time.strftime('%Y-%m-%d %H:%M') }}
+        </time>
+      </td>
+      <td>
+        <a href="/cameras/{{ ev.camera_id }}" class="link link-hover">{{ cam_label }}</a>
+      </td>
+      <td>
+        {% if ev.class_label == 'person' %}
+          <span class="badge badge-info badge-sm">{{ ev.class_label }}</span>
+        {% elif ev.class_label == 'vehicle' %}
+          <span class="badge badge-warning badge-sm">{{ ev.class_label }}</span>
+        {% else %}
+          <span class="badge badge-ghost badge-sm">{{ ev.class_label }}</span>
+        {% endif %}
+      </td>
+      <td>
+        <span class="font-mono text-xs">{{ '%d%%' % (ev.score * 100) }}</span>
+      </td>
+      <td>
+        {% if ev.snapshot_url %}
+          <a href="{{ ev.snapshot_url }}" target="_blank" class="link link-hover text-xs">view</a>
+        {% else %}
+          <span class="text-base-content/30">—</span>
+        {% endif %}
+      </td>
+      <td>
+        {% if ev.clip_built and ev.clip_url %}
+          <a href="{{ ev.clip_url }}" target="_blank" class="badge badge-success badge-sm">clip</a>
+        {% elif ev.clip_url %}
+          <span class="badge badge-ghost badge-sm">pending</span>
+        {% else %}
+          <span class="text-base-content/30">—</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% endfor %}
+{% else %}
+  <tr>
+    <td colspan="6" class="text-center text-base-content/60 py-8">
+      {{ message|default("No events match the current filter.") }}
+    </td>
+  </tr>
+{% endif %}

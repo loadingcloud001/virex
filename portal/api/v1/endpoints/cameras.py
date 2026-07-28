@@ -18,8 +18,10 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.deps import require_admin_session
+from core.config import settings
 from core.database import get_db
-from models import MTX_PATH_RE, Camera, Node, User
+from models import MTX_PATH_RE, Camera, Event, Node, User
+from schemas.events import EventOut, HlsUrlResponse
 
 logger = structlog.get_logger(__name__)
 
@@ -283,6 +285,113 @@ async def delete_camera(
         tenant_id=tenant_id,
         by_user_id=user.id,
     )
+
+
+# ---------------------------------------------------------------------------
+# HLS / WebRTC playback URL endpoints (Phase 2)
+# ---------------------------------------------------------------------------
+@router.get(
+    "/{camera_id}/hls_url",
+    response_model=HlsUrlResponse,
+    summary="Return the MediaMTX playback URLs for a camera.",
+)
+async def get_camera_hls_url(
+    camera_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    _user: User = Depends(require_admin_session),  # noqa: B008
+) -> HlsUrlResponse:
+    """Return `{hls_url, webrtc_url, mtx_path}` for the camera.
+
+    The `hls_url` is built from `settings.mediamtx_public_url` (default
+    `http://mediamtx:8888`) + `/<mtx_path>/index.m3u8`. The WebRTC URL
+    uses the WHEP endpoint at `:8889/<mtx_path>/whep` — surfaced here
+    even though the UI doesn't play it yet (Phase 3).
+    """
+    tenant_id = getattr(request.state, "tenant_id")
+    cam = (
+        await db.execute(
+            select(Camera).where(
+                Camera.id == camera_id, Camera.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    base = settings.mediamtx_public_url.rstrip("/")
+    return HlsUrlResponse(
+        hls_url=f"{base}/{cam.mtx_path}/index.m3u8",
+        webrtc_url=f"{base.rsplit(':', 1)[0]}:8889/{cam.mtx_path}/whep",
+        mtx_path=cam.mtx_path,
+    )
+
+
+@router.get(
+    "/{camera_id}/events",
+    response_model=list[EventOut],
+    summary="Recent events for a single camera (last 50, tenant-scoped).",
+)
+async def list_camera_events(
+    camera_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    _user: User = Depends(require_admin_session),  # noqa: B008
+) -> list[EventOut]:
+    """Returns the 50 most recent events for one camera, newest first.
+
+    Used by the camera detail page right rail. For the full event list
+    with filters, use `/api/events` instead.
+    """
+    import json as _json
+
+    tenant_id = getattr(request.state, "tenant_id")
+    cam = (
+        await db.execute(
+            select(Camera).where(
+                Camera.id == camera_id, Camera.tenant_id == tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    rows = (
+        await db.execute(
+            select(Event)
+            .where(Event.tenant_id == tenant_id, Event.camera_id == camera_id)
+            .order_by(Event.event_time.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+
+    out: list[EventOut] = []
+    for e in rows:
+        bbox_parsed: list[float] | None = None
+        try:
+            bbox_parsed = _json.loads(e.bbox)
+            if not isinstance(bbox_parsed, list):
+                bbox_parsed = None
+        except (ValueError, TypeError):
+            bbox_parsed = None
+        out.append(
+            EventOut(
+                id=e.id,
+                tenant_id=e.tenant_id,
+                camera_id=e.camera_id,
+                event_uuid=e.event_uuid,
+                class_label=e.class_label,
+                score=e.score,
+                bbox=e.bbox,
+                bbox_parsed=bbox_parsed,
+                snapshot_url=e.snapshot_url,
+                clip_url=e.clip_url,
+                clip_built=e.clip_built,
+                event_time=e.event_time,
+                created_at=e.created_at,
+            )
+        )
+    return out
 
 
 __all__: tuple[str, ...] = ("router",)

@@ -1,0 +1,28 @@
+{# Recent events mini-list, included by cameras/detail.html AND the
+   HTMX `/cameras/{id}/events/fragment` endpoint. #}
+{% if recent_events %}
+  <ul class="space-y-2 text-xs max-h-96 overflow-y-auto">
+    {% for ev in recent_events %}
+      <li class="flex items-start gap-2 p-2 rounded hover:bg-base-200">
+        <span class="font-mono text-base-content/40 shrink-0 w-12">
+          {{ ev.event_time.strftime('%H:%M') }}
+        </span>
+        <span class="flex-1">
+          {% if ev.class_label == 'person' %}
+            <span class="badge badge-info badge-xs">{{ ev.class_label }}</span>
+          {% elif ev.class_label == 'vehicle' %}
+            <span class="badge badge-warning badge-xs">{{ ev.class_label }}</span>
+          {% else %}
+            <span class="badge badge-ghost badge-xs">{{ ev.class_label }}</span>
+          {% endif %}
+          <span class="font-mono text-base-content/60 ml-1">{{ '%d%%' % (ev.score * 100) }}</span>
+        </span>
+        {% if ev.clip_built %}
+          <span class="badge badge-success badge-xs">clip</span>
+        {% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="text-xs text-base-content/60">No events yet for this camera.</p>
+{% endif %}

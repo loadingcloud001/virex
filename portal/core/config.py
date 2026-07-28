@@ -43,5 +43,11 @@ class Settings(BaseSettings):
     # Default MediaMTX edge ingest port (workers/readers use this).
     mediamtx_rtsp_port: int = 19554
 
+    # Public MediaMTX base URL for portal playback endpoints
+    # (`/api/cameras/{id}/hls_url` builds HLS URLs from this). In dev the
+    # portal container reaches the edge's MediaMTX via host network on
+    # port 8888; in prod this is the public CDN/Cloudflare-fronted URL.
+    mediamtx_public_url: str = "http://mediamtx:8888"
+
 
 settings = Settings()

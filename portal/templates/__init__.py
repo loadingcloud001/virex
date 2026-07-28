@@ -18,10 +18,11 @@ All non-exempt UI routes require an admin session.
 from __future__ import annotations
 
 from collections.abc import Iterator
+from datetime import datetime, timezone
 from pathlib import Path
 
 import structlog
-from fastapi import APIRouter, Depends, Form, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, RedirectResponse
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from sqlalchemy import select
@@ -36,7 +37,7 @@ from api.v1.endpoints.cameras import (
 from core.config import settings
 from core.database import get_db
 from core.security import UI_SESSION_COOKIE, UI_SESSION_TTL_SEC, create_session_token
-from models import Camera, User
+from models import Camera, Event, User
 
 logger = structlog.get_logger(__name__)
 
@@ -51,6 +52,38 @@ _env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+
+# Phase 2: tiny relative-time filter ("5 min ago" / "in 2 days" / ISO date
+# for >=7d). Used by the events list as a fallback when Alpine's
+# `relativeTime()` JS helper isn't running (no-JS clients).
+def _relative_time_filter(value: object) -> str:
+    if not isinstance(value, (str, datetime)):
+        return str(value)
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return str(value)
+    now = datetime.now(timezone.utc)
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    diff = int((now - value).total_seconds())
+    if abs(diff) < 60:
+        return "just now" if diff >= 0 else "in a moment"
+    mins = abs(diff) // 60
+    if mins < 60:
+        return f"{mins} min ago" if diff >= 0 else f"in {mins} min"
+    hrs = mins // 60
+    if hrs < 24:
+        return f"{hrs}h ago" if diff >= 0 else f"in {hrs}h"
+    days = hrs // 24
+    if days < 7:
+        return f"{days}d ago" if diff >= 0 else f"in {days}d"
+    return value.date().isoformat()
+
+
+_env.filters["relative_time"] = _relative_time_filter
 
 
 # Cookie name used for the DaisyUI theme. The value must be a valid DaisyUI
@@ -383,6 +416,163 @@ async def ui_cameras_delete(
         )
     await db.commit()
     return _redirect("/cameras")
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 UI routes
+# ---------------------------------------------------------------------------
+_WINDOW_TO_DELTA: dict[str, "datetime | None"] = {
+    "1h": None,  # populated in handler via timedelta
+    "6h": None,
+    "24h": None,
+    "7d": None,
+    "all": None,
+}
+
+
+@ui_router.get("/events", response_class=HTMLResponse)
+async def ui_events_list(
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
+) -> HTMLResponse:
+    """Event list page with toolbar + auto-refresh table."""
+    from api.v1.endpoints.events import _resolve_window as _rw
+
+    cutoff = _rw("24h")
+    cam_rows = (
+        await db.execute(
+            select(Camera)
+            .where(Camera.tenant_id == user.tenant_id)
+            .order_by(Camera.id)
+        )
+    ).scalars().all()
+    cameras_out = [
+        CameraOut(
+            id=c.id,
+            tenant_id=c.tenant_id,
+            node_id=c.node_id,
+            name=c.name,
+            location=c.location,
+            rtsp_url=c.rtsp_url,
+            mtx_path=c.mtx_path,
+            status=c.status,
+            recording_enabled=c.recording_enabled,
+            retention_days=c.retention_days,
+        )
+        for c in cam_rows
+    ]
+
+    # Initial table render: last 24h, all cameras, latest 50.
+    stmt = select(Event).where(Event.tenant_id == user.tenant_id)
+    if cutoff is not None:
+        stmt = stmt.where(Event.event_time >= cutoff)
+    stmt = stmt.order_by(Event.event_time.desc()).limit(50)
+    events = (await db.execute(stmt)).scalars().all()
+
+    cam_name_map = {c.id: c.name for c in cam_rows}
+    total = len(events)
+
+    return _render(
+        request,
+        "events/list.html",
+        events=events,
+        cameras=cameras_out,
+        cam_name_map=cam_name_map,
+        total=total,
+        now=datetime.now(timezone.utc),
+    )
+
+
+@ui_router.get("/cameras/{camera_id}", response_class=HTMLResponse)
+async def ui_camera_detail(
+    camera_id: int,
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
+) -> HTMLResponse:
+    """Camera detail page with HLS player + recent events."""
+    cam = (
+        await db.execute(
+            select(Camera).where(
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one_or_none()
+    if cam is None:
+        raise HTTPException(status_code=404, detail="camera not found")
+
+    base = settings.mediamtx_public_url.rstrip("/")
+    hls_url = f"{base}/{cam.mtx_path}/index.m3u8"
+    webrtc_url = f"{base.rsplit(':', 1)[0]}:8889/{cam.mtx_path}/whep"
+
+    # Initial 50 recent events for the right rail.
+    recent = (
+        await db.execute(
+            select(Event)
+            .where(
+                Event.tenant_id == user.tenant_id,
+                Event.camera_id == camera_id,
+            )
+            .order_by(Event.event_time.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+
+    camera_out = CameraOut(
+        id=cam.id,
+        tenant_id=cam.tenant_id,
+        node_id=cam.node_id,
+        name=cam.name,
+        location=cam.location,
+        rtsp_url=cam.rtsp_url,
+        mtx_path=cam.mtx_path,
+        status=cam.status,
+        recording_enabled=cam.recording_enabled,
+        retention_days=cam.retention_days,
+    )
+    return _render(
+        request,
+        "cameras/detail.html",
+        camera=camera_out,
+        hls_url=hls_url,
+        webrtc_url=webrtc_url,
+        recent_events=recent,
+    )
+
+
+@ui_router.get(
+    "/cameras/{camera_id}/events/fragment",
+    response_class=HTMLResponse,
+    summary="HTMX fragment — recent events for the camera detail right rail.",
+)
+async def ui_camera_events_fragment(
+    camera_id: int,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    _user: User = Depends(require_admin_session),  # noqa: B008
+) -> HTMLResponse:
+    """Returns just the `_recent_events.html` partial so HTMX can swap it."""
+    rows = (
+        await db.execute(
+            select(Event)
+            .where(Event.camera_id == camera_id)
+            .order_by(Event.event_time.desc())
+            .limit(50)
+        )
+    ).scalars().all()
+    html = _env.get_template("cameras/_recent_events.html").render(
+        recent_events=rows,
+    )
+    return HTMLResponse(html)
+
+
+@ui_router.get("/alerts", response_class=HTMLResponse)
+async def ui_alerts_coming_soon(
+    request: Request,
+    _user: User = Depends(require_admin_session),  # noqa: B008
+) -> HTMLResponse:
+    """Placeholder for Phase 2.5 alert-rules CRUD."""
+    return _render(request, "alerts/coming_soon.html")
 
 
 __all__: tuple[str, ...] = ("ui_router",)

@@ -564,3 +564,61 @@ async def test_login_form_htmx_endpoint(
     html = resp.text
     assert 'hx-post="/login"' in html
     assert 'hx-target="this"' in html
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 UI surfaces — events list + camera detail
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_events_page_renders_with_daisyui_components(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The /events page must render the filter toolbar + auto-refresh tbody."""
+    resp = await app_client.get(
+        "/events", cookies={"virex_session": auth_cookie}
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="events-toolbar"' in html
+    assert 'id="events-tbody"' in html
+    # Auto-refresh every 10s
+    assert 'hx-trigger="every 10s' in html
+    # DaisyUI select controls for camera + window
+    assert 'id="camera-filter"' in html
+    assert 'id="window-filter"' in html
+
+
+@pytest.mark.asyncio
+async def test_camera_detail_page_renders_hls_player(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The /cameras/{id} page must render the HLS player + Alpine wiring."""
+    # Need at least one camera — create via API.
+    create = await app_client.post(
+        "/api/cameras",
+        cookies={"virex_session": auth_cookie},
+        json={
+            "name": "Detail page cam",
+            "mtx_path": "detail01",
+            "rtsp_url": "rtsp://example.com/d",
+            "node_id": 1,
+        },
+    )
+    assert create.status_code == 201, create.text
+    cam_id = create.json()["id"]
+
+    resp = await app_client.get(
+        f"/cameras/{cam_id}", cookies={"virex_session": auth_cookie}
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    # hls.js from CDN
+    assert "hls.js@" in html or "hls.min.js" in html
+    # Local hls-player.js + Alpine factory
+    assert "/static/hls-player.js" in html
+    assert 'x-data="hlsPlayer(' in html
+    # <video> with x-ref
+    assert "<video" in html
+    assert 'x-ref="video"' in html
+    # HLS URL built from mtx_path
+    assert "/index.m3u8" in html

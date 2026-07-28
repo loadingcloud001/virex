@@ -49,6 +49,10 @@ _CSP_DIRECTIVES: dict[str, str] = {
     # requires migrating to a hashed-CSS build, which is Phase 3.
     "font-src": "'self' data:",
     "img-src": "'self' data: blob:",
+    # Phase 2: HLS.js attaches the .m3u8 manifest to a <video> element via
+    # MediaMTX. media-src is locked to the operator's MediaMTX host (default
+    # "mediamtx:8888"); tighten further when we know the prod hostname.
+    "media-src": "'self' mediamtx:8888 cdn.jsdelivr.net blob:",
     "frame-ancestors": "'none'",
     "base-uri": "'self'",
     "form-action": "'self'",

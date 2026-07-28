@@ -1,0 +1,131 @@
+{% extends "base.html" %}
+{% block title %}{{ camera.name }} · Virex{% endblock %}
+{% block content %}
+
+{# Phase 2: HLS.js loads from CDN, hls-player.js is local + Alpine-bound. #}
+<script src="https://cdn.jsdelivr.net/npm/hls.js@1.5.17/dist/hls.min.js"
+        defer></script>
+<script src="/static/hls-player.js" defer></script>
+
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-semibold">
+    <a href="/cameras" class="link link-hover">Cameras</a>
+    <span class="text-base-content/40 mx-2">/</span>
+    <span>{{ camera.name }}</span>
+    <code class="badge badge-neutral ml-2 align-middle">{{ camera.mtx_path }}</code>
+    {% if camera.status == 'active' %}
+      <span class="badge badge-success badge-sm ml-2 align-middle">Live</span>
+    {% endif %}
+  </h1>
+  <a href="/cameras/{{ camera.id }}/edit" class="btn btn-ghost btn-sm">Edit</a>
+</div>
+
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+  {# Left column (col-span-2): live player + transport tabs. #}
+  <div class="lg:col-span-2 space-y-3">
+
+    {# Transport tabs — HLS works, WebRTC reserved for Phase 3. #}
+    <div role="tablist" class="tabs tabs-boxed w-fit">
+      <a role="tab" class="tab tab-active">HLS</a>
+      <a role="tab" class="tab opacity-40 cursor-not-allowed"
+         title="WebRTC WHEP ships in Phase 3">WebRTC (Phase 3)</a>
+    </div>
+
+    {# Live player. Alpine `x-data="hlsPlayer('{{ hls_url }}')"` wires
+       up hls.js on `init()`; `x-ref="video"` exposes the element so the
+       factory can attach. #}
+    <div class="card bg-base-100 shadow-sm overflow-hidden"
+         x-data="hlsPlayer('{{ hls_url }}')"
+         x-init="init()">
+      <figure class="bg-black aspect-video flex items-center justify-center">
+        <video x-ref="video"
+               controls
+               autoplay
+               muted
+               playsinline
+               crossorigin="anonymous"
+               class="w-full h-full object-contain">
+        </video>
+      </figure>
+      {# Friendly error UI when hls.js fails to attach or MediaMTX is unreachable. #}
+      <template x-if="error">
+        <div role="alert" class="alert alert-warning m-3">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0"
+               fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                  d="M12 9v2m0 4h.01M5 19h14a2 2 0 001.84-2.75L13.74 4a2 2 0 00-3.48 0L3.16 16.25A2 2 0 005 19z"/>
+          </svg>
+          <span x-text="error"></span>
+        </div>
+      </template>
+    </div>
+
+    {# HLS endpoint — informational + copyable for the operator. #}
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4 text-xs">
+        <div class="font-semibold mb-1">Playback URLs</div>
+        <div>HLS: <code class="break-all">{{ hls_url }}</code></div>
+        <div>WebRTC (Phase 3): <code class="break-all text-base-content/40">{{ webrtc_url }}</code></div>
+      </div>
+    </div>
+
+  </div>
+
+  {# Right column: camera info + recent events. #}
+  <div class="space-y-3">
+
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <div class="font-semibold mb-2">Camera</div>
+        <dl class="text-xs space-y-1">
+          <div class="flex justify-between">
+            <dt class="text-base-content/60">Location</dt>
+            <dd>{{ camera.location or "—" }}</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-base-content/60">RTSP</dt>
+            <dd><code class="break-all">{{ camera.rtsp_url[:32] }}…</code></dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-base-content/60">Recording</dt>
+            <dd>
+              {% if camera.recording_enabled %}
+                <span class="text-success">enabled</span>
+              {% else %}
+                <span class="text-base-content/40">disabled</span>
+              {% endif %}
+            </dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-base-content/60">Retention</dt>
+            <dd>{{ camera.retention_days }} days</dd>
+          </div>
+          <div class="flex justify-between">
+            <dt class="text-base-content/60">Node</dt>
+            <dd><a href="#" class="link link-hover">#{{ camera.node_id or "—" }}</a></dd>
+          </div>
+        </dl>
+      </div>
+    </div>
+
+    {# Recent events for this camera — HTMX auto-refresh every 5s. #}
+    <div class="card bg-base-100 shadow-sm">
+      <div class="card-body p-4">
+        <div class="font-semibold mb-2 flex items-center justify-between">
+          <span>Recent events</span>
+          <span class="badge badge-ghost badge-sm">{{ recent_events|length }}</span>
+        </div>
+        <div id="recent-events-list"
+             hx-get="/cameras/{{ camera.id }}/events/fragment"
+             hx-trigger="every 5s"
+             hx-swap="innerHTML">
+          {% include "cameras/_recent_events.html" with context %}
+        </div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+{% endblock %}

@@ -12,24 +12,31 @@ What it does:
 3. Creates a single Node row for the local edge.
 4. Pre-populates cameras matching the current `state/workers.yaml`
    (so existing workers keep working through the migration).
+5. Optional: inserts demo events with `event_uuid` prefix `demo-` so the
+   `/events` UI can be exercised without a running detector. Controlled
+   via `--demo-events` CLI flag or `VIREX_BOOTSTRAP_DEMO_EVENTS` env
+   (default: True in dev).
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
+import random
 import re
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import structlog
 import yaml
-from sqlalchemy import select
+from sqlalchemy import delete, select
 
 from core.config import settings
 from core.database import SessionLocal, engine
 from core.security import hash_password
-from models import Camera, Node, Tenant, User
+from models import Camera, Event, Node, Tenant, User
 
 logger = structlog.get_logger(__name__)
 
@@ -170,13 +177,115 @@ async def _ensure_cameras_from_workers_yaml(session, tenant: Tenant, node: Node)
     return created
 
 
+async def _ensure_demo_events(
+    session, tenant: Tenant, count: int = 20
+) -> tuple[int, int]:
+    """Insert demo events across the tenant's first active camera.
+
+    Idempotent: purges prior `demo-` rows on each run, so re-running
+    produces a stable demo set. Bumps `current_config_version` is
+    not needed (events don't change edge state).
+
+    Returns `(purged, inserted)`.
+    """
+    # First, purge any prior demo events so re-runs are deterministic.
+    purged = (
+        await session.execute(
+            delete(Event).where(
+                Event.tenant_id == tenant.id,
+                Event.event_uuid.like("demo-%"),
+            )
+        )
+    ).rowcount or 0
+
+    # Find the first active camera in this tenant.
+    cam = (
+        await session.execute(
+            select(Camera)
+            .where(Camera.tenant_id == tenant.id, Camera.status == "active")
+            .order_by(Camera.id)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if cam is None:
+        logger.info("seed_demo_events_skipped_no_camera")
+        return purged, 0
+
+    rng = random.Random(42)  # deterministic across runs
+    class_labels = ["person", "vehicle", "dog", "package", "bicycle"]
+    now = datetime.now(timezone.utc)
+
+    inserted = 0
+    for i in range(count):
+        event_time = now - timedelta(minutes=rng.randint(1, 360))
+        class_label = rng.choice(class_labels)
+        score = round(rng.uniform(0.45, 0.97), 4)
+        # bbox is "[x,y,w,h]" normalized to image dims (640x480)
+        x = round(rng.uniform(0.1, 0.7), 4)
+        y = round(rng.uniform(0.1, 0.7), 4)
+        w = round(rng.uniform(0.05, 0.4), 4)
+        h = round(rng.uniform(0.1, 0.5), 4)
+        bbox = f"[{x},{y},{w},{h}]"
+        ev = Event(
+            tenant_id=tenant.id,
+            camera_id=cam.id,
+            event_uuid=f"demo-{cam.mtx_path}-{i:03d}",
+            class_label=class_label,
+            score=score,
+            bbox=bbox,
+            snapshot_url=None,
+            clip_url=None,
+            clip_built=False,
+            event_time=event_time,
+        )
+        session.add(ev)
+        inserted += 1
+
+    if inserted:
+        await session.commit()
+
+    logger.info(
+        "seed_demo_events_done",
+        camera_id=cam.id,
+        mtx_path=cam.mtx_path,
+        purged=purged,
+        inserted=inserted,
+    )
+    return purged, inserted
+
+
 async def main() -> int:
     """Run the full seed flow."""
+    parser = argparse.ArgumentParser(description="Portal seeder")
+    parser.add_argument(
+        "--demo-events",
+        dest="demo_events",
+        action="store_true",
+        default=None,
+        help="Insert demo events (default: env VIREX_BOOTSTRAP_DEMO_EVENTS, else True in dev)",
+    )
+    parser.add_argument(
+        "--no-demo-events",
+        dest="demo_events",
+        action="store_false",
+        help="Skip demo events",
+    )
+    args = parser.parse_args()
+
+    if args.demo_events is None:
+        demo_events_env = os.environ.get("VIREX_BOOTSTRAP_DEMO_EVENTS", "1")
+        demo_events = demo_events_env.lower() not in {"0", "false", "no"}
+    else:
+        demo_events = args.demo_events
+
     async with SessionLocal() as session:
         tenant = await _ensure_tenant(session)
         await _ensure_admin(session, tenant)
         node = await _ensure_node(session, tenant)
         cameras_created = await _ensure_cameras_from_workers_yaml(session, tenant, node)
+        demo_purged, demo_inserted = (0, 0)
+        if demo_events:
+            demo_purged, demo_inserted = await _ensure_demo_events(session, tenant)
 
     print(
         f"\n✅ Seed complete:\n"
@@ -185,6 +294,7 @@ async def main() -> int:
         f"   admin password = {settings.bootstrap_admin_password!r}\n"
         f"   node id = {node.id} (hostname={node.hostname})\n"
         f"   cameras created = {cameras_created}\n"
+        f"   demo events = {demo_inserted} (purged {demo_purged})\n"
     )
     return 0
 

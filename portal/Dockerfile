@@ -23,7 +23,8 @@ RUN pip install --quiet \
         "bcrypt>=4.0" \
         "pyjwt>=2" \
         "jinja2>=3.1" \
-        "python-multipart>=0.0.9"
+        "python-multipart>=0.0.9" \
+        "pyyaml>=6.0"
 
 COPY core/        ./core/
 COPY middleware/  ./middleware/
@@ -39,6 +40,10 @@ COPY app.py       ./app.py
 # alembic.ini lives at the portal/ subdirectory in the build context.
 # (The portal builds from /portal, not from the repo root.)
 COPY alembic.ini  ./alembic.ini
+# pyproject.toml is required by `python -m portal.seed` if it ever
+# needs to import optional helpers in dev. The container installs via
+# pip at build time so this is mostly belt-and-suspenders.
+COPY pyproject.toml ./pyproject.toml
 
 EXPOSE 8000
 

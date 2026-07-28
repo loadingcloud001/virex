@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Events · Virex{% endblock %}
+{% block content %}
+
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-semibold">
+    Events
+    <span class="badge badge-neutral ml-2 align-middle">{{ tenant_slug }}</span>
+  </h1>
+</div>
+
+{% include "events/_toolbar.html" %}
+
+<div class="card bg-base-100 shadow-sm overflow-hidden">
+  <div class="overflow-x-auto">
+    <table class="table table-zebra">
+      <thead>
+        <tr>
+          <th>Time</th>
+          <th>Camera</th>
+          <th>Class</th>
+          <th>Score</th>
+          <th>Snapshot</th>
+          <th>Clip</th>
+        </tr>
+      </thead>
+      {# hx-trigger=every 10s for live refresh; hx-get rebuilds the
+         <tbody> without touching the toolbar or surrounding chrome. #}
+      <tbody id="events-tbody"
+             hx-get="/api/events/table"
+             hx-trigger="every 10s, change from:#camera-filter delay:200ms, change from:#window-filter delay:200ms"
+             hx-include="#events-toolbar"
+             hx-swap="innerHTML">
+        {% include "events/_rows.html" with context %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<p class="text-xs text-base-content/60 mt-4">
+  Showing {{ total }} event{{ "" if total == 1 else "s" }} in the selected window.
+  Live refresh every 10 seconds.
+</p>
+
+{% endblock %}

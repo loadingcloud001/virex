@@ -1,0 +1,7 @@
+{# Empty-state fragment returned by `/api/events/table` when the filter
+   matches zero events. Single row, single cell, colspan=6. #}
+<tr>
+  <td colspan="6" class="text-center text-base-content/60 py-8">
+    {{ message|default("No events match the current filter.") }}
+  </td>
+</tr>
