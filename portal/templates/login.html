@@ -1,24 +1,57 @@
 {% extends "base.html" %}
 {% block title %}Login · Virex{% endblock %}
 {% block content %}
-<h1>Sign in</h1>
 
-<div class="card" style="max-width: 420px;">
-  <form method="post" action="/login">
-    <label for="email">Email</label>
-    <input id="email" name="email" type="email" autocomplete="username" required autofocus>
-
-    <label for="password">Password</label>
-    <input id="password" name="password" type="password" autocomplete="current-password" required>
-
-    <div style="margin-top: 20px;">
-      <button type="submit">Sign in</button>
+<div class="hero min-h-[60vh]">
+  <div class="hero-content flex-col w-full max-w-md">
+    <div class="text-center mb-4">
+      <h1 class="text-3xl font-bold">Sign in</h1>
+      <p class="text-base-content/60 mt-2 text-sm">
+        Tenant resolved from Host header: <code class="badge badge-ghost">{{ tenant_slug }}</code>.
+        In local dev (<code class="badge badge-ghost">127.0.0.1</code>) the default tenant is used.
+      </p>
     </div>
-  </form>
+
+    {# Login card — uses HTMX for progressive enhancement: on JS-enabled
+       browsers the form submits via AJAX; on no-JS browsers it falls back
+       to a native POST that redirects via the 303 response. #}
+    <div class="card bg-base-100 shadow-xl w-full">
+      <div class="card-body">
+        <form method="post" action="/login"
+              hx-post="/login"
+              hx-target="this"
+              hx-swap="outerHTML"
+              hx-disabled-elt="find button[type=submit]"
+              class="space-y-3">
+          <label class="form-control w-full">
+            <div class="label"><span class="label-text">Email</span></div>
+            <input name="email" type="email" autocomplete="username"
+                   required autofocus
+                   class="input input-bordered w-full" />
+          </label>
+
+          <label class="form-control w-full">
+            <div class="label"><span class="label-text">Password</span></div>
+            <input name="password" type="password" autocomplete="current-password"
+                   required
+                   class="input input-bordered w-full" />
+          </label>
+
+          {# Inline error region. When HTMX POSTs and login fails, the server
+             returns a full HTML fragment (this same template) with a flash
+             message; we re-render the whole form. #}
+          {% if flash %}
+            <div role="alert" class="alert alert-error text-sm">{{ flash }}</div>
+          {% endif %}
+
+          <button type="submit" class="btn btn-primary w-full mt-2">
+            <span class="htmx-indicator loading loading-spinner loading-xs"></span>
+            Sign in
+          </button>
+        </form>
+      </div>
+    </div>
+  </div>
 </div>
 
-<p style="color: var(--muted); margin-top: 32px; font-size: 13px;">
-  Tenant resolved from Host header: <code>{{ tenant_slug }}</code>.
-  In local dev (<code>127.0.0.1</code>) the default tenant is used.
-</p>
 {% endblock %}

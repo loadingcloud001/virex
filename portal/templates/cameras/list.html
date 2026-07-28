@@ -1,53 +1,47 @@
 {% extends "base.html" %}
 {% block title %}Cameras · Virex{% endblock %}
 {% block content %}
-<h1>Cameras <span style="color: var(--muted); font-weight: 400; font-size: 14px;">({{ tenant_slug }})</span></h1>
 
-<div style="margin-bottom: 16px;">
-  <a href="/cameras/new" class="btn">+ Add camera</a>
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-semibold">
+    Cameras
+    <span class="badge badge-neutral ml-2 align-middle">{{ tenant_slug }}</span>
+  </h1>
+  <a href="/cameras/new" class="btn btn-primary btn-sm">
+    + Add camera
+  </a>
 </div>
 
 {% if cameras %}
-<div class="card" style="padding: 0;">
-  <table>
-    <thead>
-      <tr>
-        <th>mtx_path</th>
-        <th>Name</th>
-        <th>Location</th>
-        <th>RTSP URL</th>
-        <th>Status</th>
-        <th>Record</th>
-        <th></th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for cam in cameras %}
-      <tr>
-        <td><code>{{ cam.mtx_path }}</code></td>
-        <td>{{ cam.name }}</td>
-        <td>{{ cam.location or "" }}</td>
-        <td><code style="font-size: 12px;">{{ cam.rtsp_url[:48] }}{% if cam.rtsp_url|length > 48 %}…{% endif %}</code></td>
-        <td>
-          {% if cam.status == "active" %}<span class="badge ok">active</span>
-          {% elif cam.status == "deleted" %}<span class="badge muted">deleted</span>
-          {% else %}<span class="badge muted">{{ cam.status }}</span>{% endif %}
-        </td>
-        <td>{% if cam.recording_enabled %}✓{% else %}—{% endif %}</td>
-        <td style="text-align: right;">
-          <a href="/cameras/{{ cam.id }}/edit">Edit</a>
-          <form class="inline" method="post" action="/cameras/{{ cam.id }}/delete" onsubmit="return confirm('Delete camera {{ cam.mtx_path }}?');">
-            <button type="submit" class="danger" style="padding: 4px 10px; font-size: 12px;">Delete</button>
-          </form>
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
-</div>
+  <div class="card bg-base-100 shadow-sm overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="table table-zebra">
+        <thead>
+          <tr>
+            <th>mtx_path</th>
+            <th>Name</th>
+            <th>Location</th>
+            <th>RTSP URL</th>
+            <th>Status</th>
+            <th>Record</th>
+            <th class="text-right">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="cameras-tbody">
+          {% for cam in cameras %}
+            {% include "cameras/_row.html" with context %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
 {% else %}
-<div class="empty">
-  No cameras yet. <a href="/cameras/new">Add one</a> to get started.
-</div>
+  <div class="card bg-base-100 border-2 border-dashed border-base-300">
+    <div class="card-body items-center text-center">
+      <p class="text-base-content/60">No cameras yet.</p>
+      <a href="/cameras/new" class="btn btn-primary btn-sm mt-2">Add one</a>
+    </div>
+  </div>
 {% endif %}
+
 {% endblock %}

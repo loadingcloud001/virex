@@ -1,51 +1,113 @@
 {% extends "base.html" %}
 {% block title %}{% if camera %}Edit camera · Virex{% else %}Add camera · Virex{% endif %}{% endblock %}
 {% block content %}
-<h1>{% if camera %}Edit camera: <code>{{ camera.mtx_path }}</code>{% else %}Add camera{% endif %}</h1>
 
-<div class="card" style="max-width: 720px;">
-  <form method="post" action="{% if camera %}/cameras/{{ camera.id }}/edit{% else %}/cameras/new{% endif %}">
-    <label for="name">Name</label>
-    <input id="name" name="name" type="text" required value="{{ camera.name if camera else '' }}">
+<h1 class="text-2xl font-semibold mb-6">
+  {% if camera %}
+    Edit camera: <code class="badge badge-neutral">{{ camera.mtx_path }}</code>
+  {% else %}
+    Add camera
+  {% endif %}
+</h1>
 
-    <label for="mtx_path">mtx_path</label>
-    <input id="mtx_path" name="mtx_path" type="text" required pattern="[a-z0-9]+"
-           value="{{ camera.mtx_path if camera else '' }}"
-           {% if camera %}readonly{% endif %}>
-    <small style="color: var(--muted);">Lowercase alphanumeric. No underscores (MediaMTX nests them).</small>
+<div class="card bg-base-100 shadow-sm max-w-3xl">
+  <div class="card-body">
+    <form method="post"
+          action="{% if camera %}/cameras/{{ camera.id }}/edit{% else %}/cameras/new{% endif %}"
+          x-data="cameraForm({% if camera %}'{{ camera.name }}'{% else %}''{% endif %})"
+          class="space-y-3">
 
-    <label for="rtsp_url">RTSP URL</label>
-    <input id="rtsp_url" name="rtsp_url" type="text" required
-           placeholder="rtsp://user:pass@host:554/path"
-           value="{{ camera.rtsp_url if camera else '' }}">
+      <label class="form-control w-full">
+        <div class="label"><span class="label-text">Name</span></div>
+        <input name="name" type="text" required
+               value="{{ camera.name if camera else '' }}"
+               x-model="name"
+               class="input input-bordered w-full" />
+      </label>
 
-    <label for="location">Location (optional)</label>
-    <input id="location" name="location" type="text" value="{{ camera.location if camera else '' }}">
+      <label class="form-control w-full">
+        <div class="label">
+          <span class="label-text">mtx_path</span>
+          {% if camera %}
+            <span class="label-text-alt text-warning">read-only after creation</span>
+          {% endif %}
+        </div>
+        <input name="mtx_path" type="text" required pattern="[a-z0-9]+"
+               value="{{ camera.mtx_path if camera else '' }}"
+               {% if camera %}readonly{% endif %}
+               class="input input-bordered w-full font-mono" />
+        <div class="label">
+          <span class="label-text-alt text-base-content/60">
+            Lowercase alphanumeric. No underscores (MediaMTX nests them).
+          </span>
+        </div>
+      </label>
 
-    <div class="row">
-      <div>
-        <label for="node_id">Node ID</label>
-        <input id="node_id" name="node_id" type="number" min="1"
-               value="{{ camera.node_id if camera and camera.node_id else '1' }}">
+      <label class="form-control w-full">
+        <div class="label"><span class="label-text">RTSP URL</span></div>
+        <input name="rtsp_url" type="text" required
+               placeholder="rtsp://user:pass@host:554/path"
+               value="{{ camera.rtsp_url if camera else '' }}"
+               class="input input-bordered w-full font-mono" />
+      </label>
+
+      <label class="form-control w-full">
+        <div class="label"><span class="label-text">Location (optional)</span></div>
+        <input name="location" type="text"
+               value="{{ camera.location if camera else '' }}"
+               class="input input-bordered w-full" />
+      </label>
+
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <label class="form-control">
+          <div class="label"><span class="label-text">Node ID</span></div>
+          <input name="node_id" type="number" min="1"
+                 value="{{ camera.node_id if camera and camera.node_id else '1' }}"
+                 class="input input-bordered" />
+        </label>
+
+        <label class="form-control">
+          <div class="label">
+            <span class="label-text">Retention (days)</span>
+          </div>
+          <input name="retention_days" type="number" min="1" max="365"
+                 value="{{ camera.retention_days if camera else 7 }}"
+                 class="input input-bordered" />
+        </label>
+
+        <label class="form-control">
+          <div class="label"><span class="label-text">Recording</span></div>
+          <select name="recording_enabled" class="select select-bordered">
+            <option value="true"
+                    {% if not camera or camera.recording_enabled %}selected{% endif %}>
+              enabled
+            </option>
+            <option value="false"
+                    {% if camera and not camera.recording_enabled %}selected{% endif %}>
+              disabled
+            </option>
+          </select>
+        </label>
       </div>
-      <div>
-        <label for="retention_days">Retention (days)</label>
-        <input id="retention_days" name="retention_days" type="number" min="1" max="365"
-               value="{{ camera.retention_days if camera else 7 }}">
-      </div>
-      <div>
-        <label for="recording_enabled">Recording</label>
-        <select id="recording_enabled" name="recording_enabled">
-          <option value="true" {% if not camera or camera.recording_enabled %}selected{% endif %}>enabled</option>
-          <option value="false" {% if camera and not cam.recording_enabled %}selected{% endif %}>disabled</option>
-        </select>
-      </div>
-    </div>
 
-    <div style="margin-top: 24px;">
-      <button type="submit">{% if camera %}Save{% else %}Add camera{% endif %}</button>
-      <a href="/cameras" class="btn secondary" style="margin-left: 8px;">Cancel</a>
-    </div>
-  </form>
+      <div class="flex gap-2 pt-4">
+        <button type="submit" class="btn btn-primary">
+          {% if camera %}Save{% else %}Add camera{% endif %}
+        </button>
+        <a href="/cameras" class="btn btn-ghost">Cancel</a>
+      </div>
+    </form>
+  </div>
 </div>
+
+{# Local Alpine component for the form preview / submit-state. #}
+<script>
+  document.addEventListener('alpine:init', () => {
+    window.cameraForm = (initialName) => ({
+      name: initialName,
+      // Phase 2 hook: live-validate mtx_path pattern here.
+    });
+  });
+</script>
+
 {% endblock %}

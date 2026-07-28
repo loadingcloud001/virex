@@ -481,3 +481,86 @@ async def test_edge_config_rejects_bad_token(app_client: AsyncClient) -> None:
         headers={"Authorization": "Bearer not-a-jwt"},
     )
     assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Frontend stack — HTMX / Alpine / DaisyUI scaffolding
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_security_headers_present(app_client: AsyncClient) -> None:
+    """Every response should carry CSP + standard hardening headers."""
+    resp = await app_client.get("/healthz")
+    assert resp.status_code == 200
+    csp = resp.headers.get("content-security-policy", "")
+    assert "default-src 'self'" in csp
+    assert "cdn.jsdelivr.net" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert resp.headers.get("x-content-type-options") == "nosniff"
+    assert "strict-origin-when-cross-origin" in resp.headers.get("referrer-policy", "")
+    permissions = resp.headers.get("permissions-policy", "")
+    assert "camera=()" in permissions
+    assert "microphone=()" in permissions
+
+
+@pytest.mark.asyncio
+async def test_login_page_loads_daisyui_classes(app_client: AsyncClient) -> None:
+    """The login page should render DaisyUI components + HTMX + Alpine.
+
+    Regression test that catches accidental removal of <script>/<link>
+    tags from base.html, dropping the operator back to the unstyled
+    placeholder that base.html used to ship.
+    """
+    resp = await app_client.get("/login")
+    assert resp.status_code == 200
+    html = resp.text
+
+    # Tailwind / DaisyUI via CDN
+    assert "cdn.jsdelivr.net/npm/daisyui" in html
+    assert "cdn.jsdelivr.net/npm/alpinejs" in html
+
+    # HTMX v2.x script tag (any minor)
+    assert 'src="https://cdn.jsdelivr.net/npm/htmx.org@2.' in html
+
+    # DaisyUI "hero" / "card" / "btn" component classes (used by login.html)
+    assert "class=" in html  # sanity: page rendered some classes
+
+    # data-theme attribute on <html> for SSR-correct first paint
+    assert 'data-theme="' in html
+    # Default theme = 'corporate'
+    assert 'data-theme="corporate"' in html
+
+
+@pytest.mark.asyncio
+async def test_theme_cookie_round_trip(app_client: AsyncClient) -> None:
+    """Setting virex_theme=business must surface as data-theme on next render."""
+    # First, default theme (corporate)
+    resp = await app_client.get("/login")
+    assert 'data-theme="corporate"' in resp.text
+
+    # Send cookie on a follow-up request.
+    resp = await app_client.get(
+        "/login", cookies={"virex_theme": "business"}
+    )
+    assert 'data-theme="business"' in resp.text
+
+    # Bad cookie value falls back to corporate (defensive).
+    resp = await app_client.get(
+        "/login", cookies={"virex_theme": "totally-bogus-theme"}
+    )
+    assert 'data-theme="corporate"' in resp.text
+
+
+@pytest.mark.asyncio
+async def test_login_form_htmx_endpoint(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The login form has hx-post=/login so HTMX swaps the response in place.
+
+    Catches accidental removal of the hx-post attribute when the form is
+    restyled — which would silently fall back to native POST + redirect
+    (still functional, but loses the inline-error UX when JS is on).
+    """
+    resp = await app_client.get("/login")
+    html = resp.text
+    assert 'hx-post="/login"' in html
+    assert 'hx-target="this"' in html

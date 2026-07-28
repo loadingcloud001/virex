@@ -53,6 +53,19 @@ _env = Environment(
 )
 
 
+# Cookie name used for the DaisyUI theme. The value must be a valid DaisyUI
+# v5 theme name. Restricting to the two we ship (corporate / business) keeps
+# the data-theme attribute tightly bound to our component definitions.
+_THEME_COOKIE = "virex_theme"
+_VALID_THEMES = frozenset({"corporate", "business"})
+
+
+def _resolve_theme(request: Request) -> str:
+    """Read the theme from the cookie. Falls back to 'corporate'."""
+    cookie_value = request.cookies.get(_THEME_COOKIE, "corporate")
+    return cookie_value if cookie_value in _VALID_THEMES else "corporate"
+
+
 def _render(
     request: Request,
     template_name: str,
@@ -64,6 +77,7 @@ def _render(
         "user": user,
         "tenant_slug": getattr(request.state, "tenant_slug", settings.default_tenant_slug),
         "tenant_id": getattr(request.state, "tenant_id", None),
+        "theme": _resolve_theme(request),
         "flash": None,
         "flash_ok": False,
     }

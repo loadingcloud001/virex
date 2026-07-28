@@ -1,0 +1,41 @@
+{# Single camera table-row partial — designed to be a HTMX swap target so
+   future delete/edit endpoints (Phase 2) can return just this fragment. #}
+<tr id="camera-row-{{ cam.id }}">
+  <td><code class="text-xs">{{ cam.mtx_path }}</code></td>
+  <td>{{ cam.name }}</td>
+  <td>{{ cam.location or "—" }}</td>
+  <td>
+    <code class="text-xs">{{ cam.rtsp_url[:48] }}{% if cam.rtsp_url|length > 48 %}…{% endif %}</code>
+  </td>
+  <td>
+    {% if cam.status == "active" %}
+      <span class="badge badge-success badge-sm">active</span>
+    {% elif cam.status == "deleted" %}
+      <span class="badge badge-ghost badge-sm">deleted</span>
+    {% else %}
+      <span class="badge badge-ghost badge-sm">{{ cam.status }}</span>
+    {% endif %}
+  </td>
+  <td>
+    {% if cam.recording_enabled %}
+      <span class="text-success" title="Recording enabled">✓</span>
+    {% else %}
+      <span class="text-base-content/40">—</span>
+    {% endif %}
+  </td>
+  <td class="text-right space-x-1">
+    <a href="/cameras/{{ cam.id }}/edit"
+       class="btn btn-ghost btn-xs">Edit</a>
+    {# Delete form — uses HTMX for inline removal in Phase 2; for Phase 1
+       it falls back to a standard POST + redirect. #}
+    <form method="post"
+          action="/cameras/{{ cam.id }}/delete"
+          class="inline"
+          hx-post="/cameras/{{ cam.id }}/delete"
+          hx-target="#camera-row-{{ cam.id }}"
+          hx-swap="outerHTML"
+          hx-confirm="Delete camera {{ cam.mtx_path }}?">
+      <button type="submit" class="btn btn-error btn-xs">Delete</button>
+    </form>
+  </td>
+</tr>

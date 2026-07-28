@@ -1,129 +1,142 @@
+{# SPDX-License-Identifier: Apache-2.0 #}
 <!doctype html>
-<html lang="en">
+{# Theme is resolved server-side from the virex_theme cookie so first paint
+   matches without a flash. Default = "corporate" (light). The toggle (in the
+   navbar) writes the cookie + flips data-theme; Alpine persists via localStorage. #}
+<html lang="en" data-theme="{{ theme }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Virex Portal{% endblock %}</title>
+
+  {# Tailwind v3 Play CDN + DaisyUI v4 component library (MIT).
+     Phase 3: switch these <link>/<script> tags to local copies in
+     portal/static/vendor/ once the design stabilises. #}
+  <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.7.4/dist/full.min.css">
+  {# Fallback in case DaisyUI v5 CDN shape changes; the v4 bundle is what we
+     target via daisyui() plugin directive below. The full v4 standalone CSS
+     provides components without needing the Tailwind v4 @plugin pipeline. #}
+
+  {# HTMX v2 — server-driven AJAX via HTML attributes. BSD-2-Clause. #}
+  <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"
+          defer></script>
+
+  {# Alpine.js v3 — local-only UI state (modals, dropdowns, theme toggle).
+     MIT. Used for state that doesn't need a server round-trip. #}
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"
+          defer></script>
+
   <style>
-    /* Minimal hand-rolled CSS — no Tailwind yet (Phase 2). Phase 1 ships
-       with a single stylesheet in <style> below so the operator doesn't
-       need a build step. Tailwind / a real asset pipeline is planned
-       for Phase 2 when we add Event list + WebRTC player. */
-    :root {
-      --bg: #0f1115;
-      --panel: #1a1d23;
-      --border: #2a2f38;
-      --fg: #e7e9ee;
-      --muted: #9aa0a6;
-      --accent: #4f8cff;
-      --accent-hover: #6a9fff;
-      --danger: #d9594f;
-      --ok: #5fb368;
-    }
-    *, *::before, *::after { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0; background: var(--bg); color: var(--fg);
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-      font-size: 14px; line-height: 1.5;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { color: var(--accent-hover); text-decoration: underline; }
-    header.nav {
-      display: flex; align-items: center; justify-content: space-between;
-      padding: 12px 24px; background: var(--panel); border-bottom: 1px solid var(--border);
-    }
-    header.nav .brand { font-weight: 600; letter-spacing: 0.02em; }
-    header.nav nav a { margin-right: 16px; }
-    header.nav .user { color: var(--muted); }
-    main {
-      max-width: 1100px; margin: 32px auto; padding: 0 24px;
-    }
-    h1, h2, h3 { font-weight: 600; letter-spacing: -0.01em; }
-    h1 { font-size: 22px; margin: 0 0 24px; }
-    h2 { font-size: 18px; margin: 24px 0 12px; }
-    .card {
-      background: var(--panel); border: 1px solid var(--border); border-radius: 8px;
-      padding: 20px 24px; margin-bottom: 16px;
-    }
-    table {
-      width: 100%; border-collapse: collapse; margin-top: 8px;
-    }
-    th, td {
-      text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--border);
-    }
-    th {
-      font-weight: 500; color: var(--muted); font-size: 12px;
-      text-transform: uppercase; letter-spacing: 0.05em;
-    }
-    tr:hover td { background: rgba(255,255,255,0.02); }
-    .badge {
-      display: inline-block; padding: 2px 8px; border-radius: 10px;
-      font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: 0.04em;
-    }
-    .badge.ok { background: rgba(95, 179, 104, 0.15); color: var(--ok); }
-    .badge.muted { background: rgba(154, 160, 166, 0.15); color: var(--muted); }
-    .badge.danger { background: rgba(217, 89, 79, 0.15); color: var(--danger); }
-    button, .btn {
-      display: inline-block; padding: 8px 14px; border-radius: 6px;
-      background: var(--accent); color: #fff; border: 0; cursor: pointer;
-      font: inherit; font-weight: 500;
-    }
-    button:hover, .btn:hover { background: var(--accent-hover); }
-    button.secondary, .btn.secondary {
-      background: transparent; color: var(--fg); border: 1px solid var(--border);
-    }
-    button.danger, .btn.danger { background: var(--danger); }
-    button:disabled { opacity: 0.5; cursor: not-allowed; }
-    input, select, textarea {
-      width: 100%; padding: 8px 10px; background: var(--bg);
-      color: var(--fg); border: 1px solid var(--border); border-radius: 4px;
-      font: inherit; margin-top: 4px;
-    }
-    label { display: block; margin: 12px 0 4px; font-size: 13px; color: var(--muted); }
-    .row { display: flex; gap: 16px; align-items: flex-end; }
-    .row > * { flex: 1; }
-    .empty {
-      padding: 32px; text-align: center; color: var(--muted);
-      border: 1px dashed var(--border); border-radius: 8px;
-    }
-    .flash {
-      padding: 12px 16px; border-radius: 6px; margin-bottom: 16px;
-      background: rgba(217, 89, 79, 0.1); border: 1px solid var(--danger);
-      color: var(--fg);
-    }
-    .flash.ok {
-      background: rgba(95, 179, 104, 0.1); border-color: var(--ok);
-    }
-    form.inline { display: inline; }
+    /* Inline-only overrides — DaisyUI handles colours / spacing / typography. */
+    [x-cloak] { display: none !important; }
+    .htmx-indicator { opacity: 0; transition: opacity 200ms ease-in; }
+    .htmx-indicator.htmx-request { opacity: 1; }
+    .htmx-request.htmx-indicator { opacity: 1; }
   </style>
 </head>
-<body>
-  <header class="nav">
-    <div>
-      <a class="brand" href="/cameras">Virex</a>
-      <nav style="display: inline-block; margin-left: 24px;">
-        {% if user %}
-          <a href="/cameras">Cameras</a>
-          <a href="/users">Users</a>
-        {% endif %}
-      </nav>
-    </div>
-    <div>
+<body class="min-h-screen bg-base-200 text-base-content">
+
+  {# Navbar — DaisyUI navbar component with theme toggle (Alpine) #}
+  <div class="navbar bg-base-100 shadow-sm">
+    <div class="flex-1">
+      <a href="/cameras" class="btn btn-ghost text-xl font-semibold">Virex</a>
       {% if user %}
-        <span class="user">{{ user.email }} · {{ user.role }} · tenant <code>{{ tenant_slug }}</code></span>
-        <form class="inline" method="post" action="/logout" style="margin-left: 16px;">
-          <button type="submit" class="secondary">Logout</button>
-        </form>
-      {% else %}
-        <a href="/login">Login</a>
+        <ul class="menu menu-horizontal px-1 ml-4">
+          <li><a href="/cameras">Cameras</a></li>
+        </ul>
       {% endif %}
     </div>
-  </header>
-  <main>
+    <div class="flex-none gap-2">
+      {# Theme toggle — Alpine reads initial state from data attribute set by
+         server, then mirrors to virex_theme cookie for SSR consistency. #}
+      <div x-data="themeToggle('{{ theme }}')"
+           x-init="init()"
+           @toggle-theme.window="toggle()">
+        <button class="btn btn-ghost btn-circle"
+                :aria-label="dark ? 'Switch to light theme' : 'Switch to dark theme'"
+                @click="toggle()">
+          <svg x-show="!dark" x-cloak xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+          </svg>
+          <svg x-show="dark" x-cloak xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>
+          </svg>
+        </button>
+      </div>
+      {% if user %}
+        <div class="dropdown dropdown-end">
+          <div tabindex="0" role="button" class="btn btn-ghost">
+            {{ user.email }} <span class="badge badge-sm ml-2">{{ user.role }}</span>
+          </div>
+          <ul tabindex="0" class="dropdown-content menu bg-base-100 rounded-box z-[1] w-52 p-2 shadow">
+            <li class="menu-title"><span>tenant <code>{{ tenant_slug }}</code></span></li>
+            <li>
+              <form method="post" action="/logout">
+                <button type="submit" class="text-error">Logout</button>
+              </form>
+            </li>
+          </ul>
+        </div>
+      {% else %}
+        <a href="/login" class="btn btn-primary btn-sm">Login</a>
+      {% endif %}
+    </div>
+  </div>
+
+  <main class="container mx-auto max-w-6xl p-6">
     {% if flash %}
-      <div class="flash {% if flash_ok %}ok{% endif %}">{{ flash }}</div>
+      <div role="alert"
+           class="alert {% if flash_ok %}alert-success{% else %}alert-error{% endif %} mb-4">
+        <span>{{ flash }}</span>
+      </div>
     {% endif %}
+
     {% block content %}{% endblock %}
   </main>
+
+  <footer class="footer footer-center p-4 text-base-content/60 text-xs">
+    <span>
+      tenant <code class="badge badge-ghost">{{ tenant_slug }}</code>
+      · portal v0.1.0
+    </span>
+  </footer>
+
+  {# Register the theme toggle Alpine component once per page. #}
+  <script>
+    document.addEventListener('alpine:init', () => {
+      window.themeToggle = (initialTheme) => ({
+        dark: initialTheme === 'business',
+        init() {
+          // Sync from localStorage on subsequent loads so the toggle "sticks".
+          try {
+            const stored = localStorage.getItem('virex_theme');
+            if (stored && stored !== initialTheme) {
+              this.dark = stored === 'business';
+              this._applyToDom();
+            }
+          } catch (e) { /* localStorage unavailable; ignore */ }
+        },
+        toggle() {
+          this.dark = !this.dark;
+          this._applyToDom();
+          this._persist();
+        },
+        _applyToDom() {
+          document.documentElement.setAttribute(
+            'data-theme', this.dark ? 'business' : 'corporate');
+        },
+        _persist() {
+          try {
+            localStorage.setItem(
+              'virex_theme', this.dark ? 'business' : 'corporate');
+          } catch (e) { /* ignore */ }
+          document.cookie =
+            'virex_theme=' + (this.dark ? 'business' : 'corporate')
+            + '; path=/; max-age=31536000; SameSite=Lax';
+        },
+      });
+    });
+  </script>
 </body>
 </html>

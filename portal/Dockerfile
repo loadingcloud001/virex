@@ -32,6 +32,7 @@ COPY schemas/     ./schemas/
 COPY services/    ./services/
 COPY api/         ./api/
 COPY templates/   ./templates/
+COPY static/      ./static/
 COPY migrations/  ./migrations/
 COPY seed.py      ./seed.py
 COPY app.py       ./app.py
