@@ -111,6 +111,8 @@ def _render(
         "tenant_slug": getattr(request.state, "tenant_slug", settings.default_tenant_slug),
         "tenant_id": getattr(request.state, "tenant_id", None),
         "theme": _resolve_theme(request),
+        "debug_login_helper": settings.debug_login_helper,
+        "bootstrap_admin_email": settings.bootstrap_admin_email,
         "flash": None,
         "flash_ok": False,
     }
@@ -202,6 +204,7 @@ async def ui_login_post(
             "login.html",
             flash="Invalid email or password.",
             tenant_slug=tenant_slug,
+            email_value=email,
         )
 
     token = create_session_token(
@@ -573,6 +576,123 @@ async def ui_alerts_coming_soon(
 ) -> HTMLResponse:
     """Placeholder for Phase 2.5 alert-rules CRUD."""
     return _render(request, "alerts/coming_soon.html")
+
+
+# ---------------------------------------------------------------------------
+# Home + dashboard
+# ---------------------------------------------------------------------------
+@ui_router.get("/")
+async def ui_root(request: Request) -> RedirectResponse:
+    """Redirect GET / to /dashboard if authed, /login otherwise.
+
+    We deliberately avoid the FastAPI dep machinery here so an
+    unauthenticated visitor sees a clean redirect rather than a 401
+    with a Location: /login header (which would be ugly in a browser).
+    """
+    cookie = request.cookies.get(UI_SESSION_COOKIE)
+    if cookie:
+        from core.security import decode_jwt as _decode
+        from jwt import PyJWTError
+        try:
+            claims = _decode(cookie, secret=settings.session_secret)
+            if claims.get("kind") == "ui_session":
+                return _redirect("/dashboard")
+        except PyJWTError:
+            pass
+    return _redirect("/login")
+
+
+@ui_router.get("/dashboard", response_class=HTMLResponse)
+async def ui_dashboard(
+    request: Request,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
+) -> HTMLResponse:
+    """Operator home: stat tiles + recent events + camera snapshot."""
+    from sqlalchemy import func as _func
+
+    # Stat 1: total cameras in this tenant.
+    cam_count = (
+        await db.execute(
+            select(_func.count()).select_from(Camera).where(
+                Camera.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one()
+    # Stat 2: active cameras.
+    active_cams = (
+        await db.execute(
+            select(_func.count()).select_from(Camera).where(
+                Camera.tenant_id == user.tenant_id, Camera.status == "active"
+            )
+        )
+    ).scalar_one()
+    # Stat 3: events today (UTC midnight cutoff).
+    from datetime import timedelta as _td
+    today_cutoff = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    events_today = (
+        await db.execute(
+            select(_func.count()).select_from(Event).where(
+                Event.tenant_id == user.tenant_id,
+                Event.event_time >= today_cutoff,
+            )
+        )
+    ).scalar_one()
+    # Stat 4: nodes online (heartbeat within 5 min).
+    from models import Node as _Node
+    hb_cutoff = datetime.now(timezone.utc) - _td(minutes=5)
+    nodes_online = (
+        await db.execute(
+            select(_func.count()).select_from(_Node).where(
+                _Node.tenant_id == user.tenant_id,
+                _Node.last_heartbeat_at >= hb_cutoff,
+            )
+        )
+    ).scalar_one()
+    total_nodes = (
+        await db.execute(
+            select(_func.count()).select_from(_Node).where(
+                _Node.tenant_id == user.tenant_id
+            )
+        )
+    ).scalar_one()
+
+    # Recent events (last 10) — for the dashboard panel.
+    recent = (
+        await db.execute(
+            select(Event)
+            .where(Event.tenant_id == user.tenant_id)
+            .order_by(Event.event_time.desc())
+            .limit(10)
+        )
+    ).scalars().all()
+
+    # Cameras by status — for the camera snapshot panel.
+    cams_by_status = (
+        await db.execute(
+            select(Camera)
+            .where(Camera.tenant_id == user.tenant_id)
+            .order_by(Camera.id)
+            .limit(8)
+        )
+    ).scalars().all()
+
+    cam_name_map = {c.id: c.name for c in cams_by_status}
+
+    return _render(
+        request,
+        "dashboard.html",
+        stat_cameras_total=cam_count,
+        stat_cameras_active=active_cams,
+        stat_events_today=events_today,
+        stat_nodes_online=nodes_online,
+        stat_nodes_total=total_nodes,
+        recent_events=recent,
+        cam_name_map=cam_name_map,
+        cameras=cams_by_status,
+    )
 
 
 __all__: tuple[str, ...] = ("ui_router",)

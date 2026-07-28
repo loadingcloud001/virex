@@ -3,7 +3,17 @@
 
    The events list endpoint passes `cam_name_map` to map camera_id to a
    human-readable label; the page-level template (`events/list.html`)
-   uses the same renderer so both code paths share the markup. #}
+   uses the same renderer so both code paths share the markup.
+
+   We also emit an OOB (out-of-band) swap element with id="events-count"
+   so the parent page's count footer updates in lockstep with the tbody. #}
+
+{# OOB swap target — only render in HTMX mode (so the page-level
+   initial render doesn't emit a duplicate #events-count-value span). #}
+{% if htmx %}
+<span id="events-count-value" hx-swap-oob="true">{{ total }}</span>
+{% endif %}
+
 {% if events %}
   {% for ev in events %}
     {% set cam_label = cam_name_map.get(ev.camera_id, "camera-" ~ ev.camera_id) %}

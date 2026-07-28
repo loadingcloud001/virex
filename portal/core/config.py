@@ -49,5 +49,10 @@ class Settings(BaseSettings):
     # port 8888; in prod this is the public CDN/Cloudflare-fronted URL.
     mediamtx_public_url: str = "http://mediamtx:8888"
 
+    # Show the dev-only "Demo credentials" helper card on the login page.
+    # Set to `False` (or set VIREX_DEBUG_LOGIN_HELPER=false) before public
+    # launch — the helper exposes the default bootstrap admin password.
+    debug_login_helper: bool = True
+
 
 settings = Settings()

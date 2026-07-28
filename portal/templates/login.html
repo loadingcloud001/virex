@@ -1,56 +1,240 @@
 {% extends "base.html" %}
-{% block title %}Login · Virex{% endblock %}
+
+{# Login hides the navbar (no Login button on a Login page). #}
+{% block navbar %}{% endblock %}
+
+{% block title %}Sign in · Virex{% endblock %}
+
 {% block content %}
 
-<div class="hero min-h-[60vh]">
-  <div class="hero-content flex-col w-full max-w-md">
-    <div class="text-center mb-4">
-      <h1 class="text-3xl font-bold">Sign in</h1>
-      <p class="text-base-content/60 mt-2 text-sm">
-        Tenant resolved from Host header: <code class="badge badge-ghost">{{ tenant_slug }}</code>.
-        In local dev (<code class="badge badge-ghost">127.0.0.1</code>) the default tenant is used.
-      </p>
-    </div>
+<div class="hero min-h-[calc(100vh-4rem)] bg-base-200">
+  <div class="hero-content flex-col lg:flex-row w-full max-w-6xl gap-12">
 
-    {# Login card — uses HTMX for progressive enhancement: on JS-enabled
-       browsers the form submits via AJAX; on no-JS browsers it falls back
-       to a native POST that redirects via the 303 response. #}
-    <div class="card bg-base-100 shadow-xl w-full">
-      <div class="card-body">
-        <form method="post" action="/login"
-              hx-post="/login"
-              hx-target="this"
-              hx-swap="outerHTML"
-              hx-disabled-elt="find button[type=submit]"
-              class="space-y-3">
-          <label class="form-control w-full">
-            <div class="label"><span class="label-text">Email</span></div>
-            <input name="email" type="email" autocomplete="username"
-                   required autofocus
-                   class="input input-bordered w-full" />
-          </label>
+    {# ============================================================ #}
+    {# Left column — branding + value props                          #}
+    {# ============================================================ #}
+    <div class="flex-1 max-w-lg space-y-8">
 
-          <label class="form-control w-full">
-            <div class="label"><span class="label-text">Password</span></div>
-            <input name="password" type="password" autocomplete="current-password"
-                   required
-                   class="input input-bordered w-full" />
-          </label>
-
-          {# Inline error region. When HTMX POSTs and login fails, the server
-             returns a full HTML fragment (this same template) with a flash
-             message; we re-render the whole form. #}
-          {% if flash %}
-            <div role="alert" class="alert alert-error text-sm">{{ flash }}</div>
-          {% endif %}
-
-          <button type="submit" class="btn btn-primary w-full mt-2">
-            <span class="htmx-indicator loading loading-spinner loading-xs"></span>
-            Sign in
-          </button>
-        </form>
+      <div class="flex items-center gap-3">
+        <div class="w-12 h-12 rounded-xl bg-primary text-primary-content
+                    flex items-center justify-center font-black text-2xl shadow-lg">
+          ◇
+        </div>
+        <div>
+          <div class="text-3xl font-bold tracking-tight">Virex</div>
+          <div class="text-base-content/60 text-sm">
+            Self-hosted AI CCTV control plane
+          </div>
+        </div>
       </div>
+
+      <h1 class="text-4xl lg:text-5xl font-semibold leading-tight">
+        Run an NVR<br>
+        <span class="text-primary">on your edge,</span><br>
+        not someone else's cloud.
+      </h1>
+
+      <p class="text-base-content/70 text-lg">
+        Multi-tenant Edge&nbsp;→&nbsp;Triton&nbsp;→&nbsp;MinIO&nbsp;→&nbsp;Portal.
+        <br>
+        Apache-2.0 stack on the edge, AGPL-3.0 on the control plane.
+      </p>
+
+      <ul class="steps steps-vertical lg:steps-horizontal w-full">
+        <li class="step step-primary">
+          <span class="text-xs">Register cameras</span>
+        </li>
+        <li class="step step-primary">
+          <span class="text-xs">Watch live streams</span>
+        </li>
+        <li class="step step-primary">
+          <span class="text-xs">Inspect detection events</span>
+        </li>
+      </ul>
+
+      <div class="flex flex-wrap items-center gap-3 text-xs text-base-content/60">
+        <span class="badge badge-outline badge-sm">AGPL-3.0</span>
+        <span class="badge badge-outline badge-sm">v0.1.0</span>
+        <span class="badge badge-outline badge-sm">Phase 2</span>
+        <span class="opacity-60">portal.loadingtechnology.app</span>
+      </div>
+
     </div>
+
+    {# ============================================================ #}
+    {# Right column — login card + (optional) demo creds helper      #}
+    {# ============================================================ #}
+    <div class="flex-1 w-full max-w-md">
+
+      <div class="card bg-base-100 shadow-2xl">
+        <div class="card-body">
+
+          <h2 class="card-title text-2xl mb-1">Sign in</h2>
+          <p class="text-base-content/60 text-sm mb-3">
+            Tenant
+            <span class="badge badge-primary badge-sm align-middle mx-1">
+              {{ tenant_slug }}
+            </span>
+            resolved from Host header.
+          </p>
+
+          {# Form: HTMX for inline error rendering. #}
+          <form method="post" action="/login"
+                hx-post="/login"
+                hx-target="this"
+                hx-swap="outerHTML"
+                hx-disabled-elt="find button[type=submit]"
+                x-data="{ showPassword: false }"
+                class="space-y-3">
+
+            <label class="form-control w-full">
+              <div class="label">
+                <span class="label-text font-medium">Email</span>
+              </div>
+              <input name="email"
+                     type="email"
+                     autocomplete="username"
+                     required
+                     autofocus
+                     placeholder="admin@{{ tenant_slug }}.example.com"
+                     value="{{ email_value|default('') }}"
+                     class="input input-bordered w-full focus:input-primary" />
+            </label>
+
+            <label class="form-control w-full">
+              <div class="label">
+                <span class="label-text font-medium">Password</span>
+                <button type="button"
+                        @click="showPassword = !showPassword"
+                        class="label-text-alt link link-hover text-xs"
+                        :aria-pressed="showPassword">
+                  <span x-show="!showPassword">Show</span>
+                  <span x-show="showPassword" x-cloak>Hide</span>
+                </button>
+              </div>
+              <div class="relative">
+                <input name="password"
+                       :type="showPassword ? 'text' : 'password'"
+                       autocomplete="current-password"
+                       required
+                       placeholder="••••••••"
+                       class="input input-bordered w-full pr-10 focus:input-primary" />
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     class="absolute right-3 top-1/2 -translate-y-1/2
+                            h-4 w-4 text-base-content/40 pointer-events-none"
+                     fill="none" viewBox="0 0 24 24"
+                     stroke="currentColor" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/>
+                </svg>
+              </div>
+            </label>
+
+            {% if flash %}
+              <div role="alert"
+                   class="alert alert-error text-sm py-2"
+                   x-data
+                   x-init="$el.focus()">
+                <svg xmlns="http://www.w3.org/2000/svg"
+                     class="h-5 w-5 shrink-0"
+                     fill="none" viewBox="0 0 24 24"
+                     stroke="currentColor" aria-hidden="true">
+                  <path stroke-linecap="round" stroke-linejoin="round"
+                        stroke-width="2"
+                        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                </svg>
+                <span>{{ flash }}</span>
+              </div>
+            {% endif %}
+
+            <button type="submit"
+                    class="btn btn-primary w-full mt-2 group">
+              <span class="htmx-indicator loading loading-spinner loading-xs"></span>
+              <span>Sign in to dashboard</span>
+              <svg xmlns="http://www.w3.org/2000/svg"
+                   class="h-4 w-4 transition-transform group-hover:translate-x-0.5"
+                   fill="none" viewBox="0 0 24 24"
+                   stroke="currentColor" aria-hidden="true">
+                <path stroke-linecap="round" stroke-linejoin="round"
+                      stroke-width="2" d="M14 5l7 7m0 0l-7 7m7-7H3"/>
+              </svg>
+            </button>
+
+            <p class="text-center text-xs text-base-content/50 mt-3">
+              Session cookie: HttpOnly · 7-day TTL · same-site lax
+            </p>
+
+          </form>
+
+        </div>
+      </div>
+
+      {# Demo credentials helper — visible only when debug_login_helper
+         is True (default in dev). Set VIREX_DEBUG_LOGIN_HELPER=false in
+         prod before going public. #}
+      {% if debug_login_helper %}
+      <div class="card bg-base-100 border-2 border-dashed border-base-300
+                  shadow-sm mt-4"
+           x-data="{
+              creds: { email: '{{ bootstrap_admin_email }}', password: 'change-me-now' },
+              copied: ''
+           }">
+        <div class="card-body p-4">
+          <div class="flex items-center gap-2 mb-2">
+            <span class="badge badge-warning badge-sm">DEV</span>
+            <span class="text-xs font-semibold">Demo credentials</span>
+            <span class="text-xs text-base-content/50 ml-auto">
+              operator-only · visible until public launch
+            </span>
+          </div>
+          <dl class="grid grid-cols-[6rem_1fr_auto] gap-x-3 gap-y-2 items-center text-xs">
+            <dt class="text-base-content/60 text-right">Email</dt>
+            <dd>
+              <code class="kbd kbd-sm w-full justify-start truncate"
+                    x-text="creds.email"></code>
+            </dd>
+            <dd>
+              <button type="button"
+                      class="btn btn-ghost btn-xs"
+                      @click="navigator.clipboard.writeText(creds.email);
+                              copied='email'; setTimeout(()=>copied='',1500)"
+                      :aria-label="'Copy email'">
+                <span x-show="copied!=='email'">copy</span>
+                <span x-show="copied==='email'" x-cloak>copied!</span>
+              </button>
+            </dd>
+
+            <dt class="text-base-content/60 text-right">Password</dt>
+            <dd>
+              <code class="kbd kbd-sm w-full justify-start truncate"
+                    x-text="creds.password"></code>
+            </dd>
+            <dd>
+              <button type="button"
+                      class="btn btn-ghost btn-xs"
+                      @click="navigator.clipboard.writeText(creds.password);
+                              copied='password'; setTimeout(()=>copied='',1500)"
+                      :aria-label="'Copy password'">
+                <span x-show="copied!=='password'">copy</span>
+                <span x-show="copied==='password'" x-cloak>copied!</span>
+              </button>
+            </dd>
+          </dl>
+          <div class="text-xs text-base-content/50 mt-3 leading-relaxed">
+            Override the password at deploy time with
+            <code class="text-xs">VIREX_BOOTSTRAP_ADMIN_PASSWORD</code>
+            or by re-running <code class="text-xs">python -m portal.seed</code>
+            after rotating <code class="text-xs">settings.bootstrap_admin_password</code>.
+            Rotate the JWT secret in <code class="text-xs">.env</code> before
+            going public.
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
+    </div>
+
   </div>
 </div>
 

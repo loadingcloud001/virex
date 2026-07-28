@@ -2,26 +2,88 @@
 {% block title %}Alerts · Virex{% endblock %}
 {% block content %}
 
-<div class="hero min-h-[50vh]">
-  <div class="hero-content text-center">
-    <div class="max-w-md">
-      <div class="text-6xl mb-3 opacity-40">🚧</div>
-      <h1 class="text-2xl font-semibold">Alerts are coming in Phase 2.5</h1>
-      <p class="text-base-content/60 mt-3">
-        The <code class="badge badge-ghost">alert_rules</code> table is in the schema,
-        but the CRUD UI + notification channel wiring (email, webhook, Telegram)
-        haven't shipped yet.
+<div class="mb-6">
+  <h1 class="text-2xl font-semibold">
+    Alerts
+    <span class="badge badge-neutral ml-2 align-middle">{{ tenant_slug }}</span>
+  </h1>
+  <p class="text-base-content/60 text-sm mt-1">
+    Phase 2 ships the schema. CRUD UI + notification channels ship in Phase 2.5.
+  </p>
+</div>
+
+<div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+  {# Card 1: Alert rules #}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <div class="flex items-center gap-2">
+        <h2 class="card-title">Alert rules</h2>
+        <span class="badge badge-warning badge-sm">soon</span>
+      </div>
+      <p class="text-base-content/60 text-sm">
+        Author trigger conditions per camera or per object class. Filter on
+        confidence threshold, schedule, and notification routing.
       </p>
-      <p class="text-base-content/60 mt-3 text-sm">
-        For now, the only way to silence alerts is to mute MediaMTX recording
-        on a per-camera basis via the
-        <a href="/cameras" class="link link-primary">Cameras</a> page.
-      </p>
-      <a href="/events" class="btn btn-primary btn-sm mt-6">
-        See live events instead
-      </a>
+      <div class="card-actions justify-end mt-2">
+        <button class="btn btn-disabled btn-sm btn-ghost" disabled>
+          Manage rules
+        </button>
+      </div>
     </div>
   </div>
+
+  {# Card 2: Notification channels #}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <div class="flex items-center gap-2">
+        <h2 class="card-title">Channels</h2>
+        <span class="badge badge-warning badge-sm">soon</span>
+      </div>
+      <p class="text-base-content/60 text-sm">
+        Email, webhook, Telegram, Slack. Per-tenant credentials stored
+        encrypted in <code class="text-xs">MinIO</code> with operator-only
+        ACL.
+      </p>
+      <div class="card-actions justify-end mt-2">
+        <button class="btn btn-disabled btn-sm btn-ghost" disabled>
+          Configure channels
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# Card 3: Recent alerts (live — falls back to /events when no rules yet) #}
+  <div class="card bg-base-100 shadow-sm">
+    <div class="card-body">
+      <div class="flex items-center gap-2">
+        <h2 class="card-title">Recent alerts</h2>
+        <span class="badge badge-info badge-sm">live</span>
+      </div>
+      <p class="text-base-content/60 text-sm">
+        Until alert rules exist, "recent alerts" = all <code class="text-xs">person</code>
+        and <code class="text-xs">vehicle</code> events.
+      </p>
+      <div class="card-actions justify-end mt-2">
+        <a href="/events" class="btn btn-primary btn-sm">View event log</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div role="alert" class="alert alert-info mt-6 text-sm">
+  <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 shrink-0"
+       fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+          d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  </svg>
+  <span>
+    The <code class="text-xs">alert_rules</code> table is in the schema; this
+    page will become the CRUD hub in Phase 2.5. For now, you can only mute
+    recording per-camera via the
+    <a href="/cameras" class="link link-primary">Cameras</a> page.
+  </span>
 </div>
 
 {% endblock %}

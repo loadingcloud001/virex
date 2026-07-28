@@ -1,6 +1,15 @@
 {# Recent events mini-list, included by cameras/detail.html AND the
-   HTMX `/cameras/{id}/events/fragment` endpoint. #}
-{% if recent_events %}
+   HTMX `/cameras/{id}/events/fragment` endpoint.
+
+   The whole `<div id="recent-events-panel">` is the HTMX swap target so
+   the count badge + list refresh together on every 5s tick. #}
+<div id="recent-events-panel">
+  <div class="font-semibold mb-2 flex items-center justify-between">
+    <span>Recent events</span>
+    <span id="recent-events-count"
+          class="badge badge-ghost badge-sm">{{ recent_events|length }}</span>
+  </div>
+  {% if recent_events %}
   <ul class="space-y-2 text-xs max-h-96 overflow-y-auto">
     {% for ev in recent_events %}
       <li class="flex items-start gap-2 p-2 rounded hover:bg-base-200">
@@ -23,6 +32,7 @@
       </li>
     {% endfor %}
   </ul>
-{% else %}
+  {% else %}
   <p class="text-xs text-base-content/60">No events yet for this camera.</p>
-{% endif %}
+  {% endif %}
+</div>

@@ -622,3 +622,138 @@ async def test_camera_detail_page_renders_hls_player(
     assert 'x-ref="video"' in html
     # HLS URL built from mtx_path
     assert "/index.m3u8" in html
+
+
+# ---------------------------------------------------------------------------
+# Polish pass — DaisyUI v4 CDN, navbar visibility, dashboard route
+# ---------------------------------------------------------------------------
+@pytest.mark.asyncio
+async def test_login_page_uses_daisyui_v4_cdn(app_client: AsyncClient) -> None:
+    """The login HTML must reference the DaisyUI v4 standalone CSS bundle."""
+    resp = await app_client.get("/login")
+    assert resp.status_code == 200
+    assert "daisyui@4" in resp.text
+    # v5 path should NOT appear (it 404s).
+    assert "daisyui@5.7.4/dist/full.min.css" not in resp.text
+
+
+@pytest.mark.asyncio
+async def test_login_page_hides_navbar(app_client: AsyncClient) -> None:
+    """The /login page should render without the navbar — only on the
+    login page do we override the navbar block in base.html."""
+    resp = await app_client.get("/login")
+    assert resp.status_code == 200
+    # DaisyUI navbar div class is "navbar bg-base-100 shadow-sm"
+    assert 'class="navbar bg-base-100 shadow-sm"' not in resp.text
+    # But the two-column hero MUST still be present.
+    assert "hero-content flex-col lg:flex-row" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_login_helper_visible_in_dev(app_client: AsyncClient) -> None:
+    """Default `debug_login_helper=True` must surface the demo-credentials card."""
+    resp = await app_client.get("/login")
+    assert resp.status_code == 200
+    html = resp.text
+    assert "Demo credentials" in html
+    assert "change-me-now" in html
+    assert "admin@acme.example.com" in html
+
+
+@pytest.mark.asyncio
+async def test_root_redirects_dashboard_when_authed(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """GET / → /dashboard when a session cookie is present.
+
+    We assert on the unfollowed redirect (303 + Location header) so the
+    test isn't sensitive to httpx's redirect-following quirks.
+    """
+    resp = await app_client.get(
+        "/", cookies={"virex_session": auth_cookie}, follow_redirects=False
+    )
+    assert resp.status_code in (302, 303, 307)
+    assert resp.headers.get("location") == "/dashboard"
+
+
+@pytest.mark.asyncio
+async def test_root_redirects_login_when_unauthed(app_client: AsyncClient) -> None:
+    """GET / → /login when no session cookie is present."""
+    resp = await app_client.get("/", follow_redirects=False)
+    assert resp.status_code in (302, 303, 307)
+    assert resp.headers.get("location") == "/login"
+
+
+@pytest.mark.asyncio
+async def test_dashboard_renders_for_admin(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The /dashboard page renders the 4 stat tiles + recent events panel."""
+    resp = await app_client.get(
+        "/dashboard", cookies={"virex_session": auth_cookie}
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    # 4 stat titles.
+    for title in ("Cameras", "Events today", "Nodes", "Alerts firing"):
+        assert title in html
+    # Sections.
+    assert "Recent events" in html
+    assert "Cameras" in html  # also in the snapshot panel
+    # DaisyUI stat component.
+    assert "stats stats-vertical lg:stats-horizontal" in html
+
+
+@pytest.mark.asyncio
+async def test_recent_events_fragment_includes_count_badge(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The /cameras/{id}/events/fragment must include both the list and the
+    count badge inside a single swap target so HTMX refreshes both at once."""
+    # Need a camera first.
+    create = await app_client.post(
+        "/api/cameras",
+        cookies={"virex_session": auth_cookie},
+        json={
+            "name": "Frag cam",
+            "mtx_path": "fragcam01",
+            "rtsp_url": "rtsp://x/f",
+            "node_id": 1,
+        },
+    )
+    cam_id = create.json()["id"]
+
+    resp = await app_client.get(
+        f"/cameras/{cam_id}/events/fragment",
+        cookies={"virex_session": auth_cookie},
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    # Both elements live inside the same #recent-events-panel div.
+    assert 'id="recent-events-panel"' in html
+    assert 'id="recent-events-count"' in html
+
+
+@pytest.mark.asyncio
+async def test_webrtc_tab_disabled(
+    app_client: AsyncClient, auth_cookie: str
+) -> None:
+    """The WebRTC tab on camera detail must have tab-disabled + Phase 3 badge."""
+    create = await app_client.post(
+        "/api/cameras",
+        cookies={"virex_session": auth_cookie},
+        json={
+            "name": "Tab cam",
+            "mtx_path": "tabcam01",
+            "rtsp_url": "rtsp://x/t",
+            "node_id": 1,
+        },
+    )
+    cam_id = create.json()["id"]
+    resp = await app_client.get(
+        f"/cameras/{cam_id}", cookies={"virex_session": auth_cookie}
+    )
+    html = resp.text
+    assert "tab-disabled" in html
+    assert "Phase 3" in html
+    assert 'aria-disabled="true"' in html

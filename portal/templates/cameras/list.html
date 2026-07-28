@@ -12,6 +12,32 @@
   </a>
 </div>
 
+{# Stats summary #}
+<div class="stats stats-vertical sm:stats-horizontal shadow w-full mb-4">
+  <div class="stat py-3">
+    <div class="stat-title">Total</div>
+    <div class="stat-value text-lg">{{ cameras|length }}</div>
+  </div>
+  <div class="stat py-3">
+    <div class="stat-title">Active</div>
+    <div class="stat-value text-lg text-success">
+      {{ cameras|selectattr('status', 'equalto', 'active')|list|length }}
+    </div>
+  </div>
+  <div class="stat py-3">
+    <div class="stat-title">Recording</div>
+    <div class="stat-value text-lg text-info">
+      {{ cameras|selectattr('recording_enabled')|list|length }}
+    </div>
+  </div>
+  <div class="stat py-3">
+    <div class="stat-title">Deleted</div>
+    <div class="stat-value text-lg text-base-content/40">
+      {{ cameras|selectattr('status', 'equalto', 'deleted')|list|length }}
+    </div>
+  </div>
+</div>
+
 {% if cameras %}
   <div class="card bg-base-100 shadow-sm overflow-hidden">
     <div class="overflow-x-auto">
@@ -37,9 +63,14 @@
   </div>
 {% else %}
   <div class="card bg-base-100 border-2 border-dashed border-base-300">
-    <div class="card-body items-center text-center">
-      <p class="text-base-content/60">No cameras yet.</p>
-      <a href="/cameras/new" class="btn btn-primary btn-sm mt-2">Add one</a>
+    <div class="card-body items-center text-center py-10">
+      <div class="text-5xl mb-3 opacity-30">📷</div>
+      <p class="text-base-content/70 font-medium">No cameras yet</p>
+      <p class="text-base-content/50 text-sm mt-1 max-w-md">
+        Register your first camera to start streaming RTSP into MediaMTX and
+        receiving detection events.
+      </p>
+      <a href="/cameras/new" class="btn btn-primary btn-sm mt-4">Add your first camera</a>
     </div>
   </div>
 {% endif %}

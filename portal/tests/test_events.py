@@ -266,6 +266,9 @@ async def test_events_table_returns_html_fragment(seeded_client) -> None:
     assert 'id="event-row-' in html
     # Class labels render.
     assert "person" in html or "vehicle" in html or "dog" in html
+    # OOB swap element with current count must be present.
+    assert 'id="events-count-value"' in html
+    assert 'hx-swap-oob="true"' in html
 
 
 @pytest.mark.asyncio

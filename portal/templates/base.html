@@ -9,14 +9,19 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{% block title %}Virex Portal{% endblock %}</title>
 
-  {# Tailwind v3 Play CDN + DaisyUI v4 component library (MIT).
-     Phase 3: switch these <link>/<script> tags to local copies in
-     portal/static/vendor/ once the design stabilises. #}
+  {# Tailwind v4 browser CDN (MIT) — utility-class JIT for spacing/typography.
+     DaisyUI v4 standalone CSS (MIT) — component library.
+
+     Why DaisyUI v4 not v5: DaisyUI v5 dropped the standalone dist/full.min.css
+     bundle — it requires Tailwind v4's `@plugin "daisyui"` build pipeline.
+     For a no-Node.js, no-build-step portal we lock to v4.12.23 (latest stable
+     in the v4 line). All component classes we use (btn / card / navbar /
+     badge / hero / alert / kbd / tabs / steps / dropdown) are identical
+     between v4 and v5, so this isn't a downgrade in UX.
+
+     Phase 3 (per portal/static/vendor/README.md): move these to local files. #}
   <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@5.7.4/dist/full.min.css">
-  {# Fallback in case DaisyUI v5 CDN shape changes; the v4 bundle is what we
-     target via daisyui() plugin directive below. The full v4 standalone CSS
-     provides components without needing the Tailwind v4 @plugin pipeline. #}
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/daisyui@4.12.23/dist/full.min.css">
 
   {# HTMX v2 — server-driven AJAX via HTML attributes. BSD-2-Clause. #}
   <script src="https://cdn.jsdelivr.net/npm/htmx.org@2.0.10/dist/htmx.min.js"
@@ -37,12 +42,15 @@
 </head>
 <body class="min-h-screen bg-base-200 text-base-content">
 
-  {# Navbar — DaisyUI navbar component with theme toggle (Alpine) #}
+  {# Navbar — overridable block so the login page can hide it. #}
+  {% block navbar %}
   <div class="navbar bg-base-100 shadow-sm">
     <div class="flex-1">
-      <a href="/cameras" class="btn btn-ghost text-xl font-semibold">Virex</a>
+      <a href="{% if user %}/dashboard{% else %}/cameras{% endif %}"
+         class="btn btn-ghost text-xl font-semibold">Virex</a>
       {% if user %}
         <ul class="menu menu-horizontal px-1 ml-4">
+          <li><a href="/dashboard">Dashboard</a></li>
           <li><a href="/cameras">Cameras</a></li>
           <li><a href="/events">Events</a></li>
           <li><a href="/alerts">Alerts</a></li>
@@ -80,11 +88,10 @@
             </li>
           </ul>
         </div>
-      {% else %}
-        <a href="/login" class="btn btn-primary btn-sm">Login</a>
       {% endif %}
     </div>
   </div>
+  {% endblock %}
 
   <main class="container mx-auto max-w-6xl p-6">
     {% if flash %}

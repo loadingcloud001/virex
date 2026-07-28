@@ -209,6 +209,7 @@ async def list_events_table(
         cam_name_map=cam_name_map,
         now=datetime.now(timezone.utc),
         total=total,
+        htmx=True,
     )
     return HTMLResponse(html)
 
