@@ -15,7 +15,6 @@ Query parameters (shared):
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timedelta, timezone
 
 import structlog
@@ -29,6 +28,7 @@ from api.v1.deps import require_admin_session
 from core.database import get_db
 from models import Camera, Event, User
 from schemas.events import EventListResponse, EventOut
+from services.events import event_to_out
 
 logger = structlog.get_logger(__name__)
 
@@ -61,29 +61,14 @@ def _resolve_window(window: str) -> datetime | None:
 
 
 def _event_to_out(e: Event) -> EventOut:
-    bbox_parsed: list[float] | None = None
-    try:
-        bbox_parsed = json.loads(e.bbox)
-        if not isinstance(bbox_parsed, list):
-            bbox_parsed = None
-    except (json.JSONDecodeError, TypeError):
-        bbox_parsed = None
+    """Backwards-compat alias.
 
-    return EventOut(
-        id=e.id,
-        tenant_id=e.tenant_id,
-        camera_id=e.camera_id,
-        event_uuid=e.event_uuid,
-        class_label=e.class_label,
-        score=e.score,
-        bbox=e.bbox,
-        bbox_parsed=bbox_parsed,
-        snapshot_url=e.snapshot_url,
-        clip_url=e.clip_url,
-        clip_built=e.clip_built,
-        event_time=e.event_time,
-        created_at=e.created_at,
-    )
+    Older callers (and the existing `templates/__init__.py` import below)
+    reference `_event_to_out`. New code should import `event_to_out`
+    from `services.events` directly — that module also has unit-test
+    surface for bbox parsing.
+    """
+    return event_to_out(e)
 
 
 async def _query_events(
@@ -126,6 +111,16 @@ _fragment_env = Environment(
     trim_blocks=True,
     lstrip_blocks=True,
 )
+
+
+def _install_filters(env: Environment) -> None:
+    """Register the shared Jinja filters on a fragment env."""
+    from templates import _class_badge_filter, _relative_time_filter
+    env.filters["relative_time"] = _relative_time_filter
+    env.filters["class_badge"] = _class_badge_filter
+
+
+_install_filters(_fragment_env)
 
 
 # ---------------------------------------------------------------------------
@@ -198,18 +193,25 @@ async def list_events_table(
             cid: (cname or mtx) for (cid, cname, mtx) in cam_rows
         }
 
+    # Always emit an OOB (out-of-band) swap element so the parent page's
+    # "Showing X events" footer reflects the current count, even when
+    # the filtered result is empty. Without this the count stays stale.
+    oob_count = f'<span id="events-count-value" hx-swap-oob="true">{total}</span>'
+
     if not items:
-        html = _fragment_env.get_template("events/_empty.html").render(
+        html = oob_count + _fragment_env.get_template("events/_empty.html").render(
             message="No events match the current filter."
         )
         return HTMLResponse(html)
 
-    html = _fragment_env.get_template("events/_rows.html").render(
-        events=items,
-        cam_name_map=cam_name_map,
-        now=datetime.now(timezone.utc),
-        total=total,
-        htmx=True,
+    html = (
+        oob_count
+        + _fragment_env.get_template("events/_rows.html").render(
+            events=items,
+            cam_name_map=cam_name_map,
+            now=datetime.now(timezone.utc),
+            total=total,
+        )
     )
     return HTMLResponse(html)
 

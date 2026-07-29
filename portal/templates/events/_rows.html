@@ -1,18 +1,15 @@
-{# Single-event <tr> rows. Included by both events/list.html (initial
-   render) and the HTMX `/api/events/table` endpoint (refresh).
+{# Single-event <tr> rows. Included by events/list.html (initial render).
 
-   The events list endpoint passes `cam_name_map` to map camera_id to a
-   human-readable label; the page-level template (`events/list.html`)
-   uses the same renderer so both code paths share the markup.
+   The HTMX `/api/events/table` endpoint returns BOTH this rendered
+   table AND a separate <span id="events-count-value" hx-swap-oob="true">
+   prefix (see api/v1/endpoints/events.py) so the parent page's
+   "Showing X events" footer updates in lockstep with the tbody, even
+   when the filtered result is empty.
 
-   We also emit an OOB (out-of-band) swap element with id="events-count"
-   so the parent page's count footer updates in lockstep with the tbody. #}
-
-{# OOB swap target — only render in HTMX mode (so the page-level
-   initial render doesn't emit a duplicate #events-count-value span). #}
-{% if htmx %}
-<span id="events-count-value" hx-swap-oob="true">{{ total }}</span>
-{% endif %}
+   When this template is included from the page-level render
+   (events/list.html), `total` is provided by the route handler but
+   no OOB swap is needed (the page footer already carries the
+   #events-count-value span). #}
 
 {% if events %}
   {% for ev in events %}
@@ -29,15 +26,7 @@
       <td>
         <a href="/cameras/{{ ev.camera_id }}" class="link link-hover">{{ cam_label }}</a>
       </td>
-      <td>
-        {% if ev.class_label == 'person' %}
-          <span class="badge badge-info badge-sm">{{ ev.class_label }}</span>
-        {% elif ev.class_label == 'vehicle' %}
-          <span class="badge badge-warning badge-sm">{{ ev.class_label }}</span>
-        {% else %}
-          <span class="badge badge-ghost badge-sm">{{ ev.class_label }}</span>
-        {% endif %}
-      </td>
+      <td>{{ ev.class_label | class_badge | safe }}</td>
       <td>
         <span class="font-mono text-xs">{{ '%d%%' % (ev.score * 100) }}</span>
       </td>

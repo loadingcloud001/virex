@@ -32,6 +32,11 @@
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.9/dist/cdn.min.js"
           defer></script>
 
+  {# Local Alpine helpers (themeToggle, relativeTime). Loaded after
+     Alpine via `defer` so it can hook alpine:init. Kept in static/js/
+     rather than inline so the global template stays a layout shell. #}
+  <script src="/static/js/alpine-helpers.js" defer></script>
+
   <style>
     /* Inline-only overrides — DaisyUI handles colours / spacing / typography. */
     [x-cloak] { display: none !important; }
@@ -111,58 +116,6 @@
     </span>
   </footer>
 
-  {# Register the theme toggle Alpine component once per page. #}
-  <script>
-    document.addEventListener('alpine:init', () => {
-      window.themeToggle = (initialTheme) => ({
-        dark: initialTheme === 'business',
-        init() {
-          // Sync from localStorage on subsequent loads so the toggle "sticks".
-          try {
-            const stored = localStorage.getItem('virex_theme');
-            if (stored && stored !== initialTheme) {
-              this.dark = stored === 'business';
-              this._applyToDom();
-            }
-          } catch (e) { /* localStorage unavailable; ignore */ }
-        },
-        toggle() {
-          this.dark = !this.dark;
-          this._applyToDom();
-          this._persist();
-        },
-        _applyToDom() {
-          document.documentElement.setAttribute(
-            'data-theme', this.dark ? 'business' : 'corporate');
-        },
-        _persist() {
-          try {
-            localStorage.setItem(
-              'virex_theme', this.dark ? 'business' : 'corporate');
-          } catch (e) { /* ignore */ }
-          document.cookie =
-            'virex_theme=' + (this.dark ? 'business' : 'corporate')
-            + '; path=/; max-age=31536000; SameSite=Lax';
-        },
-      });
-
-      // Phase 2: relative-time helper used by events/list.html.
-      // `relativeTime(iso)` returns "5 min ago" / "in 2 days" / absolute
-      // for >7d. Updates every 60s via $now tick.
-      window.relativeTime = function (iso) {
-        const then = new Date(iso).getTime();
-        const now = Date.now();
-        const diff = Math.floor((now - then) / 1000);
-        if (Math.abs(diff) < 60) return diff < -10 ? 'in a moment' : 'just now';
-        const mins = Math.floor(Math.abs(diff) / 60);
-        if (Math.abs(mins) < 60) return (diff < 0 ? 'in ' : '') + mins + ' min' + (mins === 1 ? '' : 's') + (diff < 0 ? '' : ' ago');
-        const hrs = Math.floor(Math.abs(mins) / 60);
-        if (Math.abs(hrs) < 24) return (diff < 0 ? 'in ' : '') + hrs + 'h' + (diff < 0 ? '' : ' ago');
-        const days = Math.floor(Math.abs(hrs) / 24);
-        if (Math.abs(days) < 7) return (diff < 0 ? 'in ' : '') + days + 'd' + (diff < 0 ? '' : ' ago');
-        return new Date(iso).toISOString().slice(0, 10);
-      };
-    });
-  </script>
+  {# Alpine helpers are loaded via /static/js/alpine-helpers.js above. #}
 </body>
 </html>

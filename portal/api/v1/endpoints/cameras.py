@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +22,7 @@ from core.config import settings
 from core.database import get_db
 from models import MTX_PATH_RE, Camera, Event, Node, User
 from schemas.events import EventOut, HlsUrlResponse
+from services.events import event_to_out
 
 logger = structlog.get_logger(__name__)
 
@@ -330,21 +331,21 @@ async def get_camera_hls_url(
 @router.get(
     "/{camera_id}/events",
     response_model=list[EventOut],
-    summary="Recent events for a single camera (last 50, tenant-scoped).",
+    summary="Events for one camera, tenant-scoped, with optional pagination.",
 )
 async def list_camera_events(
     camera_id: int,
     request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
     _user: User = Depends(require_admin_session),  # noqa: B008
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
 ) -> list[EventOut]:
-    """Returns the 50 most recent events for one camera, newest first.
+    """Returns events for one camera, newest first.
 
-    Used by the camera detail page right rail. For the full event list
-    with filters, use `/api/events` instead.
+    Used by the camera detail page right rail (5-second HTMX refresh).
+    For the full cross-camera event list with filters, use `/api/events`.
     """
-    import json as _json
-
     tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
@@ -361,37 +362,12 @@ async def list_camera_events(
             select(Event)
             .where(Event.tenant_id == tenant_id, Event.camera_id == camera_id)
             .order_by(Event.event_time.desc())
-            .limit(50)
+            .limit(limit)
+            .offset(offset)
         )
     ).scalars().all()
 
-    out: list[EventOut] = []
-    for e in rows:
-        bbox_parsed: list[float] | None = None
-        try:
-            bbox_parsed = _json.loads(e.bbox)
-            if not isinstance(bbox_parsed, list):
-                bbox_parsed = None
-        except (ValueError, TypeError):
-            bbox_parsed = None
-        out.append(
-            EventOut(
-                id=e.id,
-                tenant_id=e.tenant_id,
-                camera_id=e.camera_id,
-                event_uuid=e.event_uuid,
-                class_label=e.class_label,
-                score=e.score,
-                bbox=e.bbox,
-                bbox_parsed=bbox_parsed,
-                snapshot_url=e.snapshot_url,
-                clip_url=e.clip_url,
-                clip_built=e.clip_built,
-                event_time=e.event_time,
-                created_at=e.created_at,
-            )
-        )
-    return out
+    return [event_to_out(r) for r in rows]  # noqa: F821 — uses services.events.import
 
 
 __all__: tuple[str, ...] = ("router",)

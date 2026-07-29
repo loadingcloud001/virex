@@ -14,6 +14,10 @@ Two flavours of auth:
 
 Both depend on `request.state.tenant_id` having been set by
 `TenantMiddleware` earlier in the chain.
+
+`tenant_id_dep` is a cheap FastAPI dependency that raises 400 if the
+TenantMiddleware did not populate `request.state.tenant_id`. Prefer
+this over `getattr(request.state, "tenant_id", None)` in endpoints.
 """
 
 from __future__ import annotations
@@ -199,11 +203,46 @@ async def require_edge_bootstrap_secret(
         )
 
 
+# ---------------------------------------------------------------------------
+# Cheap tenant_id dependency
+# ---------------------------------------------------------------------------
+async def tenant_id_dep(request: Request) -> int:
+    """Return the resolved `tenant_id` or raise 400.
+
+    Use this in any endpoint that depends on TenantMiddleware having
+    populated `request.state.tenant_id`. Replaces the silent-fallback
+    `getattr(request.state, "tenant_id", None)` pattern, which masked
+    misconfigured middleware.
+
+    Returns:
+        The current tenant_id (int).
+
+    Raises:
+        HTTPException(400): if the tenant middleware did not resolve a
+            tenant. Indicates the Host header wasn't recognized AND the
+            fallback to `default_tenant_slug` is disabled.
+    """
+    tenant_id = getattr(request.state, "tenant_id", None)
+    if tenant_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Tenant not resolved. The request reached an endpoint "
+                "expecting a tenant context, but TenantMiddleware did not "
+                "populate request.state.tenant_id. Check that the Host "
+                "header is one of the configured tenant subdomains, or "
+                "that the dev fallback to default_tenant_slug is enabled."
+            ),
+        )
+    return int(tenant_id)
+
+
 # Re-export verify_password for convenience in tests
 __all__: tuple[str, ...] = (
     "require_admin_session",
     "require_edge_jwt",
     "require_edge_bootstrap_secret",
+    "tenant_id_dep",
     "verify_password",
 )
 

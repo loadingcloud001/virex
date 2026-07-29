@@ -78,11 +78,16 @@
             resolved from Host header.
           </p>
 
-          {# Form: HTMX for inline error rendering. #}
+          {# Form: HTMX posts and targets the inline `#login-error` slot.
+             On no-JS clients the form does a native POST + 303 redirect.
+             We avoid hx-swap=outerHTML here because a 401 response
+             contains the full `<html>` document and outerHTML-swap of
+             the form would corrupt the page DOM. Targeting a sibling
+             slot keeps the swap atomic. #}
           <form method="post" action="/login"
                 hx-post="/login"
-                hx-target="this"
-                hx-swap="outerHTML"
+                hx-target="#login-error"
+                hx-swap="innerHTML"
                 hx-disabled-elt="find button[type=submit]"
                 x-data="{ showPassword: false }"
                 class="space-y-3">
@@ -131,22 +136,28 @@
               </div>
             </label>
 
-            {% if flash %}
-              <div role="alert"
-                   class="alert alert-error text-sm py-2"
-                   x-data
-                   x-init="$el.focus()">
-                <svg xmlns="http://www.w3.org/2000/svg"
-                     class="h-5 w-5 shrink-0"
-                     fill="none" viewBox="0 0 24 24"
-                     stroke="currentColor" aria-hidden="true">
-                  <path stroke-linecap="round" stroke-linejoin="round"
-                        stroke-width="2"
-                        d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
-                </svg>
-                <span>{{ flash }}</span>
-              </div>
-            {% endif %}
+            {# HTMX swap target — the POST response renders an empty
+               `<div id="login-error">…</div>` (or with the alert inside)
+               that HTMX swaps into this slot. See templates/__init__.py
+               `ui_login_post` for the response shape. #}
+            <div id="login-error">
+              {% if flash %}
+                <div role="alert"
+                     class="alert alert-error text-sm py-2"
+                     x-data
+                     x-init="$el.focus()">
+                  <svg xmlns="http://www.w3.org/2000/svg"
+                       class="h-5 w-5 shrink-0"
+                       fill="none" viewBox="0 0 24 24"
+                       stroke="currentColor" aria-hidden="true">
+                    <path stroke-linecap="round" stroke-linejoin="round"
+                          stroke-width="2"
+                          d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+                  </svg>
+                  <span>{{ flash }}</span>
+                </div>
+              {% endif %}
+            </div>
 
             <button type="submit"
                     class="btn btn-primary w-full mt-2 group">

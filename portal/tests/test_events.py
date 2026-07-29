@@ -272,6 +272,37 @@ async def test_events_table_returns_html_fragment(seeded_client) -> None:
 
 
 @pytest.mark.asyncio
+async def test_events_table_oob_count_on_empty_filter(seeded_client) -> None:
+    """OOB count must still be emitted when the filter returns 0 events.
+
+    Regression for: "events list 'Showing X events' footer stale on empty"
+    — the previous code only emitted the OOB span when items were
+    non-empty, so on filter→empty the footer stayed at the previous
+    non-zero value.
+    """
+    client, user, tenant, cam1, cam2 = seeded_client
+    cookie = await _login(client)
+    # A camera_id that doesn't exist in this tenant → zero rows.
+    resp = await client.get(
+        "/api/events/table?camera_id=99999",
+        cookies={"virex_session": cookie},
+    )
+    assert resp.status_code == 200
+    html = resp.text
+    assert 'id="events-count-value"' in html
+    assert 'hx-swap-oob="true"' in html
+    # OOB span should reflect the count (which is 0 for empty).
+    # Look for the OOB span with content "0".
+    import re as _re
+    m = _re.search(
+        r'<span id="events-count-value" hx-swap-oob="true">(\d+)</span>',
+        html,
+    )
+    assert m is not None, f"OOB span not found: {html[:200]}"
+    assert m.group(1) == "0", f"OOB count should be 0, got {m.group(1)}"
+
+
+@pytest.mark.asyncio
 async def test_events_table_empty_filter_returns_message(seeded_client) -> None:
     client, user, tenant, cam1, cam2 = seeded_client
     cookie = await _login(client)

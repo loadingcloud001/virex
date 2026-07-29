@@ -17,13 +17,7 @@
           {{ ev.event_time.strftime('%H:%M') }}
         </span>
         <span class="flex-1">
-          {% if ev.class_label == 'person' %}
-            <span class="badge badge-info badge-xs">{{ ev.class_label }}</span>
-          {% elif ev.class_label == 'vehicle' %}
-            <span class="badge badge-warning badge-xs">{{ ev.class_label }}</span>
-          {% else %}
-            <span class="badge badge-ghost badge-xs">{{ ev.class_label }}</span>
-          {% endif %}
+          {{ ev.class_label | class_badge('badge-xs') | safe }}
           <span class="font-mono text-base-content/60 ml-1">{{ '%d%%' % (ev.score * 100) }}</span>
         </span>
         {% if ev.clip_built %}
