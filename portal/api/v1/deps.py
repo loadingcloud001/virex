@@ -12,17 +12,13 @@ Two flavours of auth:
   portal's JWT secret, looks up the matching `Node` row, attaches
   `request.state.node` and the resolved `tenant_id`.
 
-Both depend on `request.state.tenant_id` having been set by
-`TenantMiddleware` earlier in the chain.
-
-`tenant_id_dep` is a cheap FastAPI dependency that raises 400 if the
-TenantMiddleware did not populate `request.state.tenant_id`. Prefer
-this over `getattr(request.state, "tenant_id", None)` in endpoints.
+Both depend on ``request.state.tenant_id`` having been set by
+``TenantMiddleware`` earlier in the chain. UI endpoints that use
+``require_admin_session`` can simply read ``user.tenant_id`` — the
+dependency cross-validates it against the middleware's value.
 """
 
 from __future__ import annotations
-
-from datetime import datetime
 
 import jwt
 import structlog
@@ -173,12 +169,10 @@ async def require_edge_jwt(
             detail="token tenant mismatch",
         )
 
-    # Touch last_heartbeat as a side-effect-free signal that the node
-    # is currently active. The /api/edge/heartbeat endpoint is still
-    # the canonical place for full health telemetry.
-    node.last_heartbeat_at = datetime.utcnow()
-    await db.commit()
-
+    # The /api/edge/heartbeat endpoint is the canonical place for
+    # updating last_heartbeat_at + status. We intentionally do NOT write
+    # here — every authenticated edge request (config pull, heartbeat,
+    # rotate) would otherwise trigger a redundant DB write + commit.
     request.state.node = node
     request.state.node_tenant_id = node.tenant_id
     return node
@@ -203,46 +197,11 @@ async def require_edge_bootstrap_secret(
         )
 
 
-# ---------------------------------------------------------------------------
-# Cheap tenant_id dependency
-# ---------------------------------------------------------------------------
-async def tenant_id_dep(request: Request) -> int:
-    """Return the resolved `tenant_id` or raise 400.
-
-    Use this in any endpoint that depends on TenantMiddleware having
-    populated `request.state.tenant_id`. Replaces the silent-fallback
-    `getattr(request.state, "tenant_id", None)` pattern, which masked
-    misconfigured middleware.
-
-    Returns:
-        The current tenant_id (int).
-
-    Raises:
-        HTTPException(400): if the tenant middleware did not resolve a
-            tenant. Indicates the Host header wasn't recognized AND the
-            fallback to `default_tenant_slug` is disabled.
-    """
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Tenant not resolved. The request reached an endpoint "
-                "expecting a tenant context, but TenantMiddleware did not "
-                "populate request.state.tenant_id. Check that the Host "
-                "header is one of the configured tenant subdomains, or "
-                "that the dev fallback to default_tenant_slug is enabled."
-            ),
-        )
-    return int(tenant_id)
-
-
 # Re-export verify_password for convenience in tests
 __all__: tuple[str, ...] = (
     "require_admin_session",
     "require_edge_jwt",
     "require_edge_bootstrap_secret",
-    "tenant_id_dep",
     "verify_password",
 )
 

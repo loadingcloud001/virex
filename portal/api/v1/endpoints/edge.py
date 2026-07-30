@@ -17,7 +17,7 @@ Endpoints:
 from __future__ import annotations
 
 import socket
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -119,7 +119,7 @@ async def register_node(
         )
     else:
         # Update liveness info; don't reset status (heartbeat does that).
-        node.last_heartbeat_at = datetime.utcnow()
+        node.last_heartbeat_at = datetime.now(timezone.utc)
         await db.commit()
 
     token = create_edge_token(
@@ -244,7 +244,7 @@ async def post_heartbeat(
     node: Node = Depends(require_edge_jwt),  # noqa: B008
 ) -> None:
     """Update node heartbeat timestamp + status. Idempotent."""
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     healthy = "healthy" if payload.healthy else "unhealthy"
 
     await db.execute(

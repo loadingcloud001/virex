@@ -12,17 +12,17 @@ from __future__ import annotations
 import re
 
 import structlog
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.v1.deps import require_admin_session
-from core.config import settings
 from core.database import get_db
 from models import MTX_PATH_RE, Camera, Event, Node, User
 from schemas.events import EventOut, HlsUrlResponse
 from services.events import event_to_out
+from services.mediamtx import build_playback_urls
 
 logger = structlog.get_logger(__name__)
 
@@ -114,14 +114,10 @@ async def _camera_to_out(c: Camera) -> CameraOut:
 # ---------------------------------------------------------------------------
 @router.get("", response_model=list[CameraOut], summary="List cameras in current tenant.")
 async def list_cameras(
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-    _user: User = Depends(require_admin_session),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
 ) -> list[CameraOut]:
-    tenant_id = getattr(request.state, "tenant_id", None)
-    if tenant_id is None:
-        return []
-    stmt = select(Camera).where(Camera.tenant_id == tenant_id).order_by(Camera.id)
+    stmt = select(Camera).where(Camera.tenant_id == user.tenant_id).order_by(Camera.id)
     rows = (await db.execute(stmt)).scalars().all()
     return [await _camera_to_out(c) for c in rows]
 
@@ -134,11 +130,9 @@ async def list_cameras(
 )
 async def create_camera(
     body: CameraCreate,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
     user: User = Depends(require_admin_session),  # noqa: B008
 ) -> CameraOut:
-    tenant_id = getattr(request.state, "tenant_id")
     _validate_mtx_path(body.mtx_path)
 
     # Uniqueness on (tenant_id, mtx_path) — globally unique mtx_path is
@@ -155,7 +149,7 @@ async def create_camera(
         )
 
     new_cam = Camera(
-        tenant_id=tenant_id,
+        tenant_id=user.tenant_id,
         node_id=body.node_id,
         name=body.name,
         location=body.location,
@@ -173,7 +167,7 @@ async def create_camera(
     logger.info(
         "camera_created",
         camera_id=new_cam.id,
-        tenant_id=tenant_id,
+        tenant_id=user.tenant_id,
         mtx_path=body.mtx_path,
         by_user_id=user.id,
     )
@@ -184,15 +178,13 @@ async def create_camera(
 @router.get("/{camera_id}", response_model=CameraOut, summary="Get a camera by id.")
 async def get_camera(
     camera_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-    _user: User = Depends(require_admin_session),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
 ) -> CameraOut:
-    tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
             select(Camera).where(
-                Camera.id == camera_id, Camera.tenant_id == tenant_id
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
             )
         )
     ).scalar_one_or_none()
@@ -205,15 +197,13 @@ async def get_camera(
 async def update_camera(
     camera_id: int,
     body: CameraUpdate,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
     user: User = Depends(require_admin_session),  # noqa: B008
 ) -> CameraOut:
-    tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
             select(Camera).where(
-                Camera.id == camera_id, Camera.tenant_id == tenant_id
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
             )
         )
     ).scalar_one_or_none()
@@ -246,7 +236,7 @@ async def update_camera(
     logger.info(
         "camera_updated",
         camera_id=cam.id,
-        tenant_id=tenant_id,
+        tenant_id=user.tenant_id,
         by_user_id=user.id,
     )
 
@@ -260,15 +250,13 @@ async def update_camera(
 )
 async def delete_camera(
     camera_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
     user: User = Depends(require_admin_session),  # noqa: B008
 ) -> None:
-    tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
             select(Camera).where(
-                Camera.id == camera_id, Camera.tenant_id == tenant_id
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
             )
         )
     ).scalar_one_or_none()
@@ -283,7 +271,7 @@ async def delete_camera(
     logger.info(
         "camera_deleted",
         camera_id=cam.id,
-        tenant_id=tenant_id,
+        tenant_id=user.tenant_id,
         by_user_id=user.id,
     )
 
@@ -298,34 +286,25 @@ async def delete_camera(
 )
 async def get_camera_hls_url(
     camera_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-    _user: User = Depends(require_admin_session),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
 ) -> HlsUrlResponse:
     """Return `{hls_url, webrtc_url, mtx_path}` for the camera.
 
-    The `hls_url` is built from `settings.mediamtx_public_url` (default
-    `http://mediamtx:8888`) + `/<mtx_path>/index.m3u8`. The WebRTC URL
-    uses the WHEP endpoint at `:8889/<mtx_path>/whep` — surfaced here
-    even though the UI doesn't play it yet (Phase 3).
+    URLs are built by ``services.mediamtx.build_playback_urls`` which
+    uses ``urllib.parse`` so the base URL may carry or omit a port.
     """
-    tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
             select(Camera).where(
-                Camera.id == camera_id, Camera.tenant_id == tenant_id
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
             )
         )
     ).scalar_one_or_none()
     if cam is None:
         raise HTTPException(status_code=404, detail="camera not found")
 
-    base = settings.mediamtx_public_url.rstrip("/")
-    return HlsUrlResponse(
-        hls_url=f"{base}/{cam.mtx_path}/index.m3u8",
-        webrtc_url=f"{base.rsplit(':', 1)[0]}:8889/{cam.mtx_path}/whep",
-        mtx_path=cam.mtx_path,
-    )
+    return build_playback_urls(cam.mtx_path)
 
 
 @router.get(
@@ -335,9 +314,8 @@ async def get_camera_hls_url(
 )
 async def list_camera_events(
     camera_id: int,
-    request: Request,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-    _user: User = Depends(require_admin_session),  # noqa: B008
+    user: User = Depends(require_admin_session),  # noqa: B008
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
 ) -> list[EventOut]:
@@ -346,11 +324,10 @@ async def list_camera_events(
     Used by the camera detail page right rail (5-second HTMX refresh).
     For the full cross-camera event list with filters, use `/api/events`.
     """
-    tenant_id = getattr(request.state, "tenant_id")
     cam = (
         await db.execute(
             select(Camera).where(
-                Camera.id == camera_id, Camera.tenant_id == tenant_id
+                Camera.id == camera_id, Camera.tenant_id == user.tenant_id
             )
         )
     ).scalar_one_or_none()
@@ -360,14 +337,14 @@ async def list_camera_events(
     rows = (
         await db.execute(
             select(Event)
-            .where(Event.tenant_id == tenant_id, Event.camera_id == camera_id)
+            .where(Event.tenant_id == user.tenant_id, Event.camera_id == camera_id)
             .order_by(Event.event_time.desc())
             .limit(limit)
             .offset(offset)
         )
     ).scalars().all()
 
-    return [event_to_out(r) for r in rows]  # noqa: F821 — uses services.events.import
+    return [event_to_out(r) for r in rows]
 
 
 __all__: tuple[str, ...] = ("router",)

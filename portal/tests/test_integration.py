@@ -377,7 +377,6 @@ async def test_edge_register_with_bootstrap_secret(app_client: AsyncClient) -> N
     body = resp.json()
     assert body["jwt_token"]
     assert body["ttl_sec"] > 0
-    return body  # type: ignore[return-value]
 
 
 @pytest.mark.asyncio
@@ -769,28 +768,28 @@ async def test_webrtc_tab_disabled(
 # ---------------------------------------------------------------------------
 @pytest.mark.asyncio
 async def test_login_helper_uses_dynamic_password(app_client: AsyncClient) -> None:
-    """The demo-credentials helper must use settings.bootstrap_admin_password
-    (not the literal 'change-me-now') so that rotating the env var is
-    sufficient to keep the helper in sync. We can't actually rotate the
-    live settings here, but we CAN assert the template sources it from the
-    rendered context (not a literal). The current env default happens to
-    BE 'change-me-now' so the literal still matches — so we instead
-    assert the template doesn't contain the OLD literal-in-template
-    pattern. We confirm `bootstrap_admin_password` flows through the
-    Jinja context by reading the rendered HTML and checking the helper
-    block matches the seed value.
+    """The demo-credentials helper must source the password from
+    ``settings.bootstrap_admin_password`` via the Jinja context — not a
+    hardcoded literal in the template.
+
+    We verify by temporarily overriding the setting to a distinctive
+    non-default value and asserting that value appears in the rendered
+    HTML (and the old literal ``change-me-now`` does NOT appear as a
+    template literal).
     """
-    resp = await app_client.get("/login")
-    assert resp.status_code == 200
-    html = resp.text
-    # The helper block.
-    assert "Demo credentials" in html
-    # The Alpine x-text references the context variable, not a literal:
-    #   x-text="creds.password"
-    # so we can't grep for the value directly. But we CAN assert that
-    # the helper-password element is NOT static and that the password is
-    # mounted from the context (the schema property).
-    assert 'x-text="creds.password"' in html
+    original = settings.bootstrap_admin_password
+    settings.bootstrap_admin_password = "rotated-test-secret-xyz"
+    try:
+        resp = await app_client.get("/login")
+        assert resp.status_code == 200
+        html = resp.text
+        assert "Demo credentials" in html
+        # The context-provided value must appear in the Alpine x-data binding.
+        assert "rotated-test-secret-xyz" in html
+        # The old hardcoded literal must NOT appear as a template string.
+        assert "'change-me-now'" not in html
+    finally:
+        settings.bootstrap_admin_password = original
 
 
 @pytest.mark.asyncio

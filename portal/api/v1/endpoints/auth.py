@@ -12,7 +12,7 @@ Phase 1:
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 
 import structlog
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
@@ -133,7 +133,7 @@ async def login(
         path="/",
     )
 
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
 
     logger.info("auth_login_ok", user_id=user.id, tenant_id=user.tenant_id)
